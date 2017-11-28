@@ -274,6 +274,14 @@ pre.tb-highlight {
   md-toolbar {
     z-index: 0;
   }
+  md-toolbar.md-table-toolbar.md-default-theme:not(.md-menu-toolbar).md-default .md-button[disabled],
+  md-toolbar.md-table-toolbar:not(.md-menu-toolbar).md-default .md-button[disabled] {
+    color: rgba(0,0,0,0.38);
+  }
+  md-toolbar.md-default-theme:not(.md-menu-toolbar) .md-button[disabled] md-icon,
+  md-toolbar:not(.md-menu-toolbar) .md-button[disabled] md-icon {
+    color: rgba(0,0,0,.28);
+  }
   span.no-data-found {
     position: relative;
     height: calc(100% - 57px);
@@ -395,11 +403,13 @@ $previewSize: 100px;
   position: relative;
   border: dashed 2px;
   height: $previewSize;
-  display: flex;
-  align-items: center;
   overflow: hidden;
   label {
     width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     font-size: 16px;
     text-align: center;
     @media (min-width: $layout-breakpoint-sm) {
@@ -484,11 +494,15 @@ md-tabs.tb-headless {
   height: 100%;
   max-width: 240px;
   span {
-    padding: 10px 10px 20px 10px;
+    padding: 0 0 20px 0;
     font-size: 18px;
     font-weight: 400;
     white-space: normal;
     line-height: 18px;
+    max-height: 18px;
+    min-height: 18px;
+    height: 18px;
+    margin: auto;
   }
 }
 
@@ -549,7 +563,7 @@ section.tb-footer-buttons {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 2;
+  z-index: 13;
   pointer-events: none;
 }
 

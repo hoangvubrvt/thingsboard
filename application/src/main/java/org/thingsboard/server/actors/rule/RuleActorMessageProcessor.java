@@ -170,7 +170,7 @@ class RuleActorMessageProcessor extends ComponentMsgProcessor<RuleId> {
             Optional<RuleToPluginMsg<?>> ruleToPluginMsgOptional = action.convert(ruleCtx, inMsg, inMsgMd);
             if (ruleToPluginMsgOptional.isPresent()) {
                 RuleToPluginMsg<?> ruleToPluginMsg = ruleToPluginMsgOptional.get();
-                logger.debug("[{}] Device msg is converter to: {}", entityId, ruleToPluginMsg);
+                logger.debug("[{}] Device msg is converted to: {}", entityId, ruleToPluginMsg);
                 context.parent().tell(new RuleToPluginMsgWrapper(pluginTenantId, pluginId, tenantId, entityId, ruleToPluginMsg), context.self());
                 if (action.isOneWayAction()) {
                     pushToNextRule(context, msg.getCtx(), RuleEngineError.NO_TWO_WAY_ACTIONS);
@@ -322,7 +322,7 @@ class RuleActorMessageProcessor extends ComponentMsgProcessor<RuleId> {
 
     @Override
     public void onClusterEventMsg(ClusterEventMsg msg) throws Exception {
-
+        //Do nothing
     }
 
     private void stopAction() {

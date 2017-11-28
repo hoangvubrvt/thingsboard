@@ -267,9 +267,9 @@ function EntityService($http, $q, $filter, $translate, $log, userService, device
                 break;
             case types.entityType.dashboard:
                 if (user.authority === 'CUSTOMER_USER') {
-                    promise = dashboardService.getCustomerDashboards(customerId, pageLink);
+                    promise = dashboardService.getCustomerDashboards(customerId, pageLink, false);
                 } else {
-                    promise = dashboardService.getTenantDashboards(pageLink);
+                    promise = dashboardService.getTenantDashboards(pageLink, false);
                 }
                 break;
             case types.entityType.user:
@@ -824,17 +824,27 @@ function EntityService($http, $q, $filter, $translate, $log, userService, device
             var subscriptionInfo = validateSubscriptionInfo(subscriptionsInfo[index]);
             if (subscriptionInfo.type === types.datasourceType.entity) {
                 if (subscriptionInfo.entityId) {
-                    getEntity(subscriptionInfo.entityType, subscriptionInfo.entityId, {ignoreLoading: true}).then(
-                        function success(entity) {
-                            createDatasourceFromSubscription(subscriptionInfo, datasources, entity);
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        },
-                        function fail() {
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        }
-                    );
+                    if (subscriptionInfo.entityName) {
+                        var entity = {
+                            id: {id: subscriptionInfo.entityId, entityType: subscriptionInfo.entityType},
+                            name: subscriptionInfo.entityName
+                        };
+                        createDatasourceFromSubscription(subscriptionInfo, datasources, entity);
+                        index++;
+                        processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
+                    } else {
+                        getEntity(subscriptionInfo.entityType, subscriptionInfo.entityId, {ignoreLoading: true}).then(
+                            function success(entity) {
+                                createDatasourceFromSubscription(subscriptionInfo, datasources, entity);
+                                index++;
+                                processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
+                            },
+                            function fail() {
+                                index++;
+                                processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
+                            }
+                        );
+                    }
                 } else if (subscriptionInfo.entityName || subscriptionInfo.entityNamePrefix
                     || subscriptionInfo.entityIds) {
                     var promise;

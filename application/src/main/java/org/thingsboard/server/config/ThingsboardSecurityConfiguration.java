@@ -28,6 +28,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -64,7 +65,7 @@ public class ThingsboardSecurityConfiguration extends WebSecurityConfigurerAdapt
     public static final String FORM_BASED_LOGIN_ENTRY_POINT = "/api/auth/login";
     public static final String PUBLIC_LOGIN_ENTRY_POINT = "/api/auth/login/public";
     public static final String TOKEN_REFRESH_ENTRY_POINT = "/api/auth/token";
-    public static final String[] NON_TOKEN_BASED_AUTH_ENTRY_POINTS = new String[] {"/index.html", "/static/**", "/api/noauth/**", "/webjars/**"};
+    protected static final String[] NON_TOKEN_BASED_AUTH_ENTRY_POINTS = new String[] {"/index.html", "/static/**", "/api/noauth/**", "/webjars/**"};
     public static final String TOKEN_BASED_AUTH_ENTRY_POINT = "/api/**";
     public static final String WS_TOKEN_BASED_AUTH_ENTRY_POINT = "/api/ws/**";
 
@@ -148,8 +149,13 @@ public class ThingsboardSecurityConfiguration extends WebSecurityConfigurerAdapt
     }
 
     @Override
+    public void configure(WebSecurity web) throws Exception {
+        web.ignoring().antMatchers("/static/**");
+    }
+
+    @Override
     protected void configure(HttpSecurity http) throws Exception {
-        http.headers().cacheControl().disable().frameOptions().disable()
+        http.headers().cacheControl().and().frameOptions().disable()
                 .and()
                 .cors()
                 .and()

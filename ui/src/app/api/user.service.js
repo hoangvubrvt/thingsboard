@@ -265,9 +265,9 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
             var pageLink = {limit: 100};
             var fetchDashboardsPromise;
             if (currentUser.authority === 'TENANT_ADMIN') {
-                fetchDashboardsPromise = dashboardService.getTenantDashboards(pageLink);
+                fetchDashboardsPromise = dashboardService.getTenantDashboards(pageLink, false);
             } else {
-                fetchDashboardsPromise = dashboardService.getCustomerDashboards(currentUser.customerId, pageLink);
+                fetchDashboardsPromise = dashboardService.getCustomerDashboards(currentUser.customerId, pageLink, false);
             }
             fetchDashboardsPromise.then(
                 function success(result) {
@@ -283,6 +283,12 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
             );
         }
 
+        function updateUserLang() {
+            if (currentUserDetails.additionalInfo && currentUserDetails.additionalInfo.lang) {
+                $translate.use(currentUserDetails.additionalInfo.lang);
+            }
+        }
+
         function procceedJwtTokenValidate() {
             validateJwtToken(doTokenRefresh).then(function success() {
                 var jwtToken = store.get('jwt_token');
@@ -296,9 +302,10 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
                     $rootScope.forceFullscreen = true;
                     fetchAllowedDashboardIds();
                 } else if (currentUser.userId) {
-                    getUser(currentUser.userId).then(
+                    getUser(currentUser.userId, true).then(
                         function success(user) {
                             currentUserDetails = user;
+                            updateUserLang();
                             $rootScope.forceFullscreen = false;
                             if (userForceFullscreen()) {
                                 $rootScope.forceFullscreen = true;
@@ -312,6 +319,7 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
                         },
                         function fail() {
                             deferred.reject();
+                            logout();
                         }
                     )
                 } else {
@@ -332,6 +340,7 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
                     updateAndValidateToken(refreshToken, 'refresh_token', false);
                     procceedJwtTokenValidate();
                 }, function fail() {
+                    $location.search('publicId', null);
                     deferred.reject();
                 });
             } else {
@@ -406,19 +415,19 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
         }
         $http.post(url, user).then(function success(response) {
             deferred.resolve(response.data);
-        }, function fail(response) {
-            deferred.reject(response.data);
+        }, function fail() {
+            deferred.reject();
         });
         return deferred.promise;
     }
 
-    function getUser(userId) {
+    function getUser(userId, ignoreErrors) {
         var deferred = $q.defer();
         var url = '/api/user/' + userId;
-        $http.get(url).then(function success(response) {
+        $http.get(url, { ignoreErrors: ignoreErrors }).then(function success(response) {
             deferred.resolve(response.data);
-        }, function fail(response) {
-            deferred.reject(response.data);
+        }, function fail() {
+            deferred.reject();
         });
         return deferred.promise;
     }
@@ -428,8 +437,8 @@ function UserService($http, $q, $rootScope, adminService, dashboardService, logi
         var url = '/api/user/' + userId;
         $http.delete(url).then(function success() {
             deferred.resolve();
-        }, function fail(response) {
-            deferred.reject(response.data);
+        }, function fail() {
+            deferred.reject();
         });
         return deferred.promise;
     }

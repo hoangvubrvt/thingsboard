@@ -27,6 +27,7 @@ import thingsboardRpcWidgets from '../widget/lib/rpc';
 import TbFlot from '../widget/lib/flot-widget';
 import TbAnalogueLinearGauge from '../widget/lib/analogue-linear-gauge';
 import TbAnalogueRadialGauge from '../widget/lib/analogue-radial-gauge';
+import TbAnalogueCompass from '../widget/lib/analogue-compass';
 import TbCanvasDigitalGauge from '../widget/lib/canvas-digital-gauge';
 import TbMapWidget from '../widget/lib/map-widget';
 import TbMapWidgetV2 from '../widget/lib/map-widget2';
@@ -57,6 +58,7 @@ function WidgetService($rootScope, $http, $q, $filter, $ocLazyLoad, $window, $tr
     $window.TbFlot = TbFlot;
     $window.TbAnalogueLinearGauge = TbAnalogueLinearGauge;
     $window.TbAnalogueRadialGauge = TbAnalogueRadialGauge;
+    $window.TbAnalogueCompass = TbAnalogueCompass;
     $window.TbCanvasDigitalGauge = TbCanvasDigitalGauge;
     $window.TbMapWidget = TbMapWidget;
     $window.TbMapWidgetV2 = TbMapWidgetV2;
@@ -560,7 +562,8 @@ function WidgetService($rootScope, $http, $q, $filter, $ocLazyLoad, $window, $tr
                                 useCustomDatasources: false,
                                 maxDatasources: -1, //unlimited
                                 maxDataKeys: -1, //unlimited
-                                dataKeysOptional: false
+                                dataKeysOptional: false,
+                                stateData: false
                            };
          '    }\n\n' +
 
@@ -630,6 +633,9 @@ function WidgetService($rootScope, $http, $q, $filter, $ocLazyLoad, $window, $tr
             }
             if (angular.isUndefined(result.typeParameters.dataKeysOptional)) {
                 result.typeParameters.dataKeysOptional = false;
+            }
+            if (angular.isUndefined(result.typeParameters.stateData)) {
+                result.typeParameters.stateData = false;
             }
             if (angular.isFunction(widgetTypeInstance.actionSources)) {
                 result.actionSources = widgetTypeInstance.actionSources();
