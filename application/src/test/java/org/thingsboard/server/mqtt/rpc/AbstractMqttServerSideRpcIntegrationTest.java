@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2017 The Thingsboard Authors
+ * Copyright © 2016-2020 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,21 +15,29 @@
  */
 package org.thingsboard.server.mqtt.rpc;
 
+import com.datastax.oss.driver.api.core.uuid.Uuids;
+import io.netty.handler.codec.mqtt.MqttQoS;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttCallback;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.*;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.client.HttpClientErrorException;
 import org.thingsboard.server.common.data.Device;
 import org.thingsboard.server.common.data.Tenant;
 import org.thingsboard.server.common.data.User;
 import org.thingsboard.server.common.data.security.Authority;
 import org.thingsboard.server.common.data.security.DeviceCredentials;
 import org.thingsboard.server.controller.AbstractControllerTest;
-import org.thingsboard.server.dao.service.DaoNoSqlTest;
+import org.thingsboard.server.mqtt.telemetry.AbstractMqttTelemetryIntegrationTest;
+import org.thingsboard.server.service.security.AccessValidator;
 
-import java.util.UUID;
+import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -42,14 +50,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractControllerTest {
 
     private static final String MQTT_URL = "tcp://localhost:1883";
-    private static final String FAIL_MSG_IF_HTTP_CLIENT_ERROR_NOT_ENCOUNTERED = "HttpClientErrorException expected, but not encountered";
+    private static final Long TIME_TO_HANDLE_REQUEST = 500L;
 
     private Tenant savedTenant;
     private User tenantAdmin;
+    private Long asyncContextTimeoutToUseRpcPlugin;
+
+    private static final AtomicInteger atomicInteger = new AtomicInteger(2);
+
 
     @Before
     public void beforeTest() throws Exception {
         loginSysAdmin();
+
+        asyncContextTimeoutToUseRpcPlugin = 10000L;
 
         Tenant tenant = new Tenant();
         tenant.setTitle("My tenant");
@@ -59,7 +73,7 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
         tenantAdmin = new User();
         tenantAdmin.setAuthority(Authority.TENANT_ADMIN);
         tenantAdmin.setTenantId(savedTenant.getId());
-        tenantAdmin.setEmail("tenant2@thingsboard.org");
+        tenantAdmin.setEmail("tenant" + atomicInteger.getAndIncrement() + "@thingsboard.org");
         tenantAdmin.setFirstName("Joe");
         tenantAdmin.setLastName("Downs");
 
@@ -70,8 +84,7 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
     public void afterTest() throws Exception {
         loginSysAdmin();
         if (savedTenant != null) {
-            doDelete("/api/tenant/" + savedTenant.getId().getId().toString())
-                    .andExpect(status().isOk());
+            doDelete("/api/tenant/" + savedTenant.getId().getId().toString()).andExpect(status().isOk());
         }
     }
 
@@ -92,17 +105,24 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
         MqttConnectOptions options = new MqttConnectOptions();
         options.setUserName(accessToken);
         client.connect(options).waitForCompletion();
-        client.subscribe("v1/devices/me/rpc/request/+", 1);
-        client.setCallback(new TestMqttCallback(client));
+
+        CountDownLatch latch = new CountDownLatch(1);
+        TestMqttCallback callback = new TestMqttCallback(client, latch);
+        client.setCallback(callback);
+
+        client.subscribe("v1/devices/me/rpc/request/+", MqttQoS.AT_MOST_ONCE.value());
+
+        Thread.sleep(2000);
 
         String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
         String deviceId = savedDevice.getId().getId().toString();
         String result = doPostAsync("/api/plugins/rpc/oneway/" + deviceId, setGpioRequest, String.class, status().isOk());
         Assert.assertTrue(StringUtils.isEmpty(result));
+        latch.await(3, TimeUnit.SECONDS);
+        assertEquals(MqttQoS.AT_MOST_ONCE.value(), callback.getQoS());
     }
 
     @Test
-    @Ignore // TODO: figure out the right error code for this case. Ignored due to failure: expected 408 but was: 200
     public void testServerMqttOneWayRpcDeviceOffline() throws Exception {
         Device device = new Device();
         device.setName("Test One-Way Server-Side RPC Device Offline");
@@ -113,31 +133,21 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
         String accessToken = deviceCredentials.getCredentialsId();
         assertNotNull(accessToken);
 
-        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
+        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"24\",\"value\": 1},\"timeout\": 6000}";
         String deviceId = savedDevice.getId().getId().toString();
-        try {
-            doPost("/api/plugins/rpc/oneway/" + deviceId, setGpioRequest, String.class, status().is(408));
-            Assert.fail(FAIL_MSG_IF_HTTP_CLIENT_ERROR_NOT_ENCOUNTERED);
-        } catch (HttpClientErrorException e) {
-            log.error(e.getMessage(), e);
-            Assert.assertEquals(HttpStatus.REQUEST_TIMEOUT, e.getStatusCode());
-            Assert.assertEquals("408 null", e.getMessage());
-        }
+
+        doPostAsync("/api/plugins/rpc/oneway/" + deviceId, setGpioRequest, String.class, status().is(409),
+                asyncContextTimeoutToUseRpcPlugin);
     }
 
     @Test
-    @Ignore // TODO: figure out the right error code for this case. Ignored due to failure: expected 400 (404?) but was: 401
     public void testServerMqttOneWayRpcDeviceDoesNotExist() throws Exception {
-        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
-        String nonExistentDeviceId = UUID.randomUUID().toString();
-        try {
-            doPostAsync("/api/plugins/rpc/oneway/" + nonExistentDeviceId, setGpioRequest, String.class, status().is(400));
-            Assert.fail(FAIL_MSG_IF_HTTP_CLIENT_ERROR_NOT_ENCOUNTERED);
-        } catch (HttpClientErrorException e) {
-            log.error(e.getMessage(), e);
-            Assert.assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
-            Assert.assertEquals("400 null", e.getMessage());
-        }
+        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"25\",\"value\": 1}}";
+        String nonExistentDeviceId = Uuids.timeBased().toString();
+
+        String result = doPostAsync("/api/plugins/rpc/oneway/" + nonExistentDeviceId, setGpioRequest, String.class,
+                status().isNotFound());
+        Assert.assertEquals(AccessValidator.DEVICE_WITH_REQUESTED_ID_NOT_FOUND, result);
     }
 
     @Test
@@ -158,9 +168,11 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
         options.setUserName(accessToken);
         client.connect(options).waitForCompletion();
         client.subscribe("v1/devices/me/rpc/request/+", 1);
-        client.setCallback(new TestMqttCallback(client));
+        client.setCallback(new TestMqttCallback(client, new CountDownLatch(1)));
 
-        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
+        Thread.sleep(2000);
+
+        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"26\",\"value\": 1}}";
         String deviceId = savedDevice.getId().getId().toString();
 
         String result = doPostAsync("/api/plugins/rpc/twoway/" + deviceId, setGpioRequest, String.class, status().isOk());
@@ -168,7 +180,6 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
     }
 
     @Test
-    @Ignore // TODO: figure out the right error code for this case. Ignored due to failure: expected 408 but was: 200
     public void testServerMqttTwoWayRpcDeviceOffline() throws Exception {
         Device device = new Device();
         device.setName("Test Two-Way Server-Side RPC Device Offline");
@@ -179,31 +190,21 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
         String accessToken = deviceCredentials.getCredentialsId();
         assertNotNull(accessToken);
 
-        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
+        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"27\",\"value\": 1},\"timeout\": 6000}";
         String deviceId = savedDevice.getId().getId().toString();
-        try {
-            doPost("/api/plugins/rpc/twoway/" + deviceId, setGpioRequest, String.class, status().is(408));
-            Assert.fail(FAIL_MSG_IF_HTTP_CLIENT_ERROR_NOT_ENCOUNTERED);
-        } catch (HttpClientErrorException e) {
-            log.error(e.getMessage(), e);
-            Assert.assertEquals(HttpStatus.REQUEST_TIMEOUT, e.getStatusCode());
-            Assert.assertEquals("408 null", e.getMessage());
-        }
+
+        doPostAsync("/api/plugins/rpc/twoway/" + deviceId, setGpioRequest, String.class, status().is(409),
+                asyncContextTimeoutToUseRpcPlugin);
     }
 
     @Test
-    @Ignore // TODO: figure out the right error code for this case. Ignored due to failure: expected 400 (404?) but was: 401
     public void testServerMqttTwoWayRpcDeviceDoesNotExist() throws Exception {
-        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"23\",\"value\": 1}}";
-        String nonExistentDeviceId = UUID.randomUUID().toString();
-        try {
-            doPostAsync("/api/plugins/rpc/oneway/" + nonExistentDeviceId, setGpioRequest, String.class, status().is(400));
-            Assert.fail(FAIL_MSG_IF_HTTP_CLIENT_ERROR_NOT_ENCOUNTERED);
-        } catch (HttpClientErrorException e) {
-            log.error(e.getMessage(), e);
-            Assert.assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
-            Assert.assertEquals("400 null", e.getMessage());
-        }
+        String setGpioRequest = "{\"method\":\"setGpio\",\"params\":{\"pin\": \"28\",\"value\": 1}}";
+        String nonExistentDeviceId = Uuids.timeBased().toString();
+
+        String result = doPostAsync("/api/plugins/rpc/twoway/" + nonExistentDeviceId, setGpioRequest, String.class,
+                status().isNotFound());
+        Assert.assertEquals(AccessValidator.DEVICE_WITH_REQUESTED_ID_NOT_FOUND, result);
     }
 
     private Device getSavedDevice(Device device) throws Exception {
@@ -217,9 +218,16 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
     private static class TestMqttCallback implements MqttCallback {
 
         private final MqttAsyncClient client;
+        private final CountDownLatch latch;
+        private Integer qoS;
 
-        TestMqttCallback(MqttAsyncClient client) {
+        TestMqttCallback(MqttAsyncClient client, CountDownLatch latch) {
             this.client = client;
+            this.latch = latch;
+        }
+
+        int getQoS() {
+            return qoS;
         }
 
         @Override
@@ -228,11 +236,13 @@ public abstract class AbstractMqttServerSideRpcIntegrationTest extends AbstractC
 
         @Override
         public void messageArrived(String requestTopic, MqttMessage mqttMessage) throws Exception {
-            log.info("Message Arrived: " + mqttMessage.getPayload().toString());
+            log.info("Message Arrived: " + Arrays.toString(mqttMessage.getPayload()));
             MqttMessage message = new MqttMessage();
             String responseTopic = requestTopic.replace("request", "response");
-            message.setPayload("{\"value1\":\"A\", \"value2\":\"B\"}".getBytes());
+            message.setPayload("{\"value1\":\"A\", \"value2\":\"B\"}".getBytes("UTF-8"));
+            qoS = mqttMessage.getQos();
             client.publish(responseTopic, message);
+            latch.countDown();
         }
 
         @Override

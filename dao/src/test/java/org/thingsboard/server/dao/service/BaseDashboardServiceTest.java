@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2017 The Thingsboard Authors
+ * Copyright © 2016-2020 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package org.thingsboard.server.dao.service;
 
-import com.datastax.driver.core.utils.UUIDs;
+import com.datastax.oss.driver.api.core.uuid.Uuids;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.After;
 import org.junit.Assert;
@@ -27,15 +27,16 @@ import org.thingsboard.server.common.data.DashboardInfo;
 import org.thingsboard.server.common.data.Tenant;
 import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.data.page.TextPageData;
-import org.thingsboard.server.common.data.page.TextPageLink;
+import org.thingsboard.server.common.data.page.PageData;
+import org.thingsboard.server.common.data.page.PageLink;
+import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.dao.exception.DataValidationException;
-import org.thingsboard.server.dao.model.ModelConstants;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
     
@@ -68,17 +69,15 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         Assert.assertNotNull(savedDashboard.getId());
         Assert.assertTrue(savedDashboard.getCreatedTime() > 0);
         Assert.assertEquals(dashboard.getTenantId(), savedDashboard.getTenantId());
-        Assert.assertNotNull(savedDashboard.getCustomerId());
-        Assert.assertEquals(ModelConstants.NULL_UUID, savedDashboard.getCustomerId().getId());
         Assert.assertEquals(dashboard.getTitle(), savedDashboard.getTitle());
         
         savedDashboard.setTitle("My new dashboard");
         
         dashboardService.saveDashboard(savedDashboard);
-        Dashboard foundDashboard = dashboardService.findDashboardById(savedDashboard.getId());
+        Dashboard foundDashboard = dashboardService.findDashboardById(tenantId, savedDashboard.getId());
         Assert.assertEquals(foundDashboard.getTitle(), savedDashboard.getTitle());
         
-        dashboardService.deleteDashboard(savedDashboard.getId());
+        dashboardService.deleteDashboard(tenantId, savedDashboard.getId());
     }
     
     @Test(expected = DataValidationException.class)
@@ -99,7 +98,7 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
     public void testSaveDashboardWithInvalidTenant() {
         Dashboard dashboard = new Dashboard();
         dashboard.setTitle("My dashboard");
-        dashboard.setTenantId(new TenantId(UUIDs.timeBased()));
+        dashboard.setTenantId(new TenantId(Uuids.timeBased()));
         dashboardService.saveDashboard(dashboard);
     }
     
@@ -110,9 +109,9 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         dashboard.setTenantId(tenantId);
         dashboard = dashboardService.saveDashboard(dashboard);
         try {
-            dashboardService.assignDashboardToCustomer(dashboard.getId(), new CustomerId(UUIDs.timeBased()));
+            dashboardService.assignDashboardToCustomer(tenantId, dashboard.getId(), new CustomerId(Uuids.timeBased()));
         } finally {
-            dashboardService.deleteDashboard(dashboard.getId());
+            dashboardService.deleteDashboard(tenantId, dashboard.getId());
         }
     }
     
@@ -130,9 +129,9 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         customer.setTitle("Test different customer");
         customer = customerService.saveCustomer(customer);
         try {
-            dashboardService.assignDashboardToCustomer(dashboard.getId(), customer.getId());
+            dashboardService.assignDashboardToCustomer(tenantId, dashboard.getId(), customer.getId());
         } finally {
-            dashboardService.deleteDashboard(dashboard.getId());
+            dashboardService.deleteDashboard(tenantId, dashboard.getId());
             tenantService.deleteTenant(tenant.getId());
         }
     }
@@ -143,10 +142,10 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         dashboard.setTenantId(tenantId);
         dashboard.setTitle("My dashboard");
         Dashboard savedDashboard = dashboardService.saveDashboard(dashboard);
-        Dashboard foundDashboard = dashboardService.findDashboardById(savedDashboard.getId());
+        Dashboard foundDashboard = dashboardService.findDashboardById(tenantId, savedDashboard.getId());
         Assert.assertNotNull(foundDashboard);
         Assert.assertEquals(savedDashboard, foundDashboard);
-        dashboardService.deleteDashboard(savedDashboard.getId());
+        dashboardService.deleteDashboard(tenantId, savedDashboard.getId());
     }
     
     @Test
@@ -155,10 +154,10 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         dashboard.setTenantId(tenantId);
         dashboard.setTitle("My dashboard");
         Dashboard savedDashboard = dashboardService.saveDashboard(dashboard);
-        Dashboard foundDashboard = dashboardService.findDashboardById(savedDashboard.getId());
+        Dashboard foundDashboard = dashboardService.findDashboardById(tenantId, savedDashboard.getId());
         Assert.assertNotNull(foundDashboard);
-        dashboardService.deleteDashboard(savedDashboard.getId());
-        foundDashboard = dashboardService.findDashboardById(savedDashboard.getId());
+        dashboardService.deleteDashboard(tenantId, savedDashboard.getId());
+        foundDashboard = dashboardService.findDashboardById(tenantId, savedDashboard.getId());
         Assert.assertNull(foundDashboard);
     }
     
@@ -179,13 +178,13 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         }
         
         List<DashboardInfo> loadedDashboards = new ArrayList<>();
-        TextPageLink pageLink = new TextPageLink(16);
-        TextPageData<DashboardInfo> pageData = null;
+        PageLink pageLink = new PageLink(16);
+        PageData<DashboardInfo> pageData = null;
         do {
             pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
             loadedDashboards.addAll(pageData.getData());
             if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
+                pageLink = pageLink.nextPageLink();
             }
         } while (pageData.hasNext());
         
@@ -196,7 +195,7 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         
         dashboardService.deleteDashboardsByTenantId(tenantId);
 
-        pageLink = new TextPageLink(31);
+        pageLink = new PageLink(31);
         pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
         Assert.assertFalse(pageData.hasNext());
         Assert.assertTrue(pageData.getData().isEmpty());
@@ -230,13 +229,13 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         }
         
         List<DashboardInfo> loadedDashboardsTitle1 = new ArrayList<>();
-        TextPageLink pageLink = new TextPageLink(19, title1);
-        TextPageData<DashboardInfo> pageData = null;
+        PageLink pageLink = new PageLink(19, 0, title1);
+        PageData<DashboardInfo> pageData = null;
         do {
             pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
             loadedDashboardsTitle1.addAll(pageData.getData());
             if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
+                pageLink = pageLink.nextPageLink();
             }
         } while (pageData.hasNext());
         
@@ -246,12 +245,12 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         Assert.assertEquals(dashboardsTitle1, loadedDashboardsTitle1);
         
         List<DashboardInfo> loadedDashboardsTitle2 = new ArrayList<>();
-        pageLink = new TextPageLink(4, title2);
+        pageLink = new PageLink(4, 0, title2);
         do {
             pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
             loadedDashboardsTitle2.addAll(pageData.getData());
             if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
+                pageLink = pageLink.nextPageLink();
             }
         } while (pageData.hasNext());
 
@@ -261,26 +260,26 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         Assert.assertEquals(dashboardsTitle2, loadedDashboardsTitle2);
 
         for (DashboardInfo dashboard : loadedDashboardsTitle1) {
-            dashboardService.deleteDashboard(dashboard.getId());
+            dashboardService.deleteDashboard(tenantId, dashboard.getId());
         }
         
-        pageLink = new TextPageLink(4, title1);
+        pageLink = new PageLink(4, 0, title1);
         pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
         Assert.assertFalse(pageData.hasNext());
         Assert.assertEquals(0, pageData.getData().size());
         
         for (DashboardInfo dashboard : loadedDashboardsTitle2) {
-            dashboardService.deleteDashboard(dashboard.getId());
+            dashboardService.deleteDashboard(tenantId, dashboard.getId());
         }
         
-        pageLink = new TextPageLink(4, title2);
+        pageLink = new PageLink(4, 0, title2);
         pageData = dashboardService.findDashboardsByTenantId(tenantId, pageLink);
         Assert.assertFalse(pageData.hasNext());
         Assert.assertEquals(0, pageData.getData().size());
     }
     
     @Test
-    public void testFindDashboardsByTenantIdAndCustomerId() {
+    public void testFindDashboardsByTenantIdAndCustomerId() throws ExecutionException, InterruptedException {
         Tenant tenant = new Tenant();
         tenant.setTitle("Test tenant");
         tenant = tenantService.saveTenant(tenant);
@@ -299,17 +298,17 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
             dashboard.setTenantId(tenantId);
             dashboard.setTitle("Dashboard"+i);
             dashboard = dashboardService.saveDashboard(dashboard);
-            dashboards.add(new DashboardInfo(dashboardService.assignDashboardToCustomer(dashboard.getId(), customerId)));
+            dashboards.add(new DashboardInfo(dashboardService.assignDashboardToCustomer(tenantId, dashboard.getId(), customerId)));
         }
         
         List<DashboardInfo> loadedDashboards = new ArrayList<>();
-        TextPageLink pageLink = new TextPageLink(23);
-        TextPageData<DashboardInfo> pageData = null;
+        PageLink pageLink = new PageLink(23);
+        PageData<DashboardInfo> pageData = null;
         do {
             pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
             loadedDashboards.addAll(pageData.getData());
             if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
+                pageLink = pageLink.nextPageLink();
             }
         } while (pageData.hasNext());
         
@@ -320,96 +319,12 @@ public abstract class BaseDashboardServiceTest extends AbstractServiceTest {
         
         dashboardService.unassignCustomerDashboards(tenantId, customerId);
 
-        pageLink = new TextPageLink(42);
+        pageLink = new PageLink(42);
         pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
         Assert.assertFalse(pageData.hasNext());
         Assert.assertTrue(pageData.getData().isEmpty());
         
         tenantService.deleteTenant(tenantId);
     }
-    
-    @Test
-    public void testFindDashboardsByTenantIdCustomerIdAndTitle() {
-        
-        Customer customer = new Customer();
-        customer.setTitle("Test customer");
-        customer.setTenantId(tenantId);
-        customer = customerService.saveCustomer(customer);
-        CustomerId customerId = customer.getId();
-        
-        String title1 = "Dashboard title 1";
-        List<DashboardInfo> dashboardsTitle1 = new ArrayList<>();
-        for (int i=0;i<124;i++) {
-            Dashboard dashboard = new Dashboard();
-            dashboard.setTenantId(tenantId);
-            String suffix = RandomStringUtils.randomAlphanumeric((int)(Math.random()*15));
-            String title = title1+suffix;
-            title = i % 2 == 0 ? title.toLowerCase() : title.toUpperCase();
-            dashboard.setTitle(title);
-            dashboard = dashboardService.saveDashboard(dashboard);
-            dashboardsTitle1.add(new DashboardInfo(dashboardService.assignDashboardToCustomer(dashboard.getId(), customerId)));
-        }
-        String title2 = "Dashboard title 2";
-        List<DashboardInfo> dashboardsTitle2 = new ArrayList<>();
-        for (int i=0;i<151;i++) {
-            Dashboard dashboard = new Dashboard();
-            dashboard.setTenantId(tenantId);
-            String suffix = RandomStringUtils.randomAlphanumeric((int)(Math.random()*15));
-            String title = title2+suffix;
-            title = i % 2 == 0 ? title.toLowerCase() : title.toUpperCase();
-            dashboard.setTitle(title);
-            dashboard = dashboardService.saveDashboard(dashboard);
-            dashboardsTitle2.add(new DashboardInfo(dashboardService.assignDashboardToCustomer(dashboard.getId(), customerId)));
-        }
-        
-        List<DashboardInfo> loadedDashboardsTitle1 = new ArrayList<>();
-        TextPageLink pageLink = new TextPageLink(24, title1);
-        TextPageData<DashboardInfo> pageData = null;
-        do {
-            pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
-            loadedDashboardsTitle1.addAll(pageData.getData());
-            if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
-            }
-        } while (pageData.hasNext());
-        
-        Collections.sort(dashboardsTitle1, idComparator);
-        Collections.sort(loadedDashboardsTitle1, idComparator);
-        
-        Assert.assertEquals(dashboardsTitle1, loadedDashboardsTitle1);
-        
-        List<DashboardInfo> loadedDashboardsTitle2 = new ArrayList<>();
-        pageLink = new TextPageLink(4, title2);
-        do {
-            pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
-            loadedDashboardsTitle2.addAll(pageData.getData());
-            if (pageData.hasNext()) {
-                pageLink = pageData.getNextPageLink();
-            }
-        } while (pageData.hasNext());
 
-        Collections.sort(dashboardsTitle2, idComparator);
-        Collections.sort(loadedDashboardsTitle2, idComparator);
-        
-        Assert.assertEquals(dashboardsTitle2, loadedDashboardsTitle2);
-
-        for (DashboardInfo dashboard : loadedDashboardsTitle1) {
-            dashboardService.deleteDashboard(dashboard.getId());
-        }
-        
-        pageLink = new TextPageLink(4, title1);
-        pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
-        Assert.assertFalse(pageData.hasNext());
-        Assert.assertEquals(0, pageData.getData().size());
-        
-        for (DashboardInfo dashboard : loadedDashboardsTitle2) {
-            dashboardService.deleteDashboard(dashboard.getId());
-        }
-        
-        pageLink = new TextPageLink(4, title2);
-        pageData = dashboardService.findDashboardsByTenantIdAndCustomerId(tenantId, customerId, pageLink);
-        Assert.assertFalse(pageData.hasNext());
-        Assert.assertEquals(0, pageData.getData().size());
-        customerService.deleteCustomer(customerId);
-    }
 }
