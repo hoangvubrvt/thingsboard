@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2017 The Thingsboard Authors
+ * Copyright © 2016-2020 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,10 +20,8 @@ import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.id.TenantId;
 
-import com.fasterxml.jackson.databind.JsonNode;
-
 @EqualsAndHashCode(callSuper = true)
-public class Device extends SearchTextBased<DeviceId> implements HasName {
+public class Device extends SearchTextBasedWithAdditionalInfo<DeviceId> implements HasName, HasTenantId, HasCustomerId {
 
     private static final long serialVersionUID = 2807343040519543363L;
 
@@ -31,7 +29,7 @@ public class Device extends SearchTextBased<DeviceId> implements HasName {
     private CustomerId customerId;
     private String name;
     private String type;
-    private transient JsonNode additionalInfo;
+    private String label;
 
     public Device() {
         super();
@@ -47,7 +45,7 @@ public class Device extends SearchTextBased<DeviceId> implements HasName {
         this.customerId = device.getCustomerId();
         this.name = device.getName();
         this.type = device.getType();
-        this.additionalInfo = device.getAdditionalInfo();
+        this.label = device.getLabel();
     }
 
     public TenantId getTenantId() {
@@ -83,14 +81,14 @@ public class Device extends SearchTextBased<DeviceId> implements HasName {
         this.type = type;
     }
 
-    public JsonNode getAdditionalInfo() {
-        return additionalInfo;
+    public String getLabel() {
+        return label;
     }
 
-    public void setAdditionalInfo(JsonNode additionalInfo) {
-        this.additionalInfo = additionalInfo;
+    public void setLabel(String label) {
+        this.label = label;
     }
-    
+
     @Override
     public String getSearchText() {
         return getName();
@@ -107,8 +105,10 @@ public class Device extends SearchTextBased<DeviceId> implements HasName {
         builder.append(name);
         builder.append(", type=");
         builder.append(type);
+        builder.append(", label=");
+        builder.append(label);
         builder.append(", additionalInfo=");
-        builder.append(additionalInfo);
+        builder.append(getAdditionalInfo());
         builder.append(", createdTime=");
         builder.append(createdTime);
         builder.append(", id=");

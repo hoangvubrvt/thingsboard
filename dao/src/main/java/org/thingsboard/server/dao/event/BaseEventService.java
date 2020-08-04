@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2017 The Thingsboard Authors
+ * Copyright © 2016-2020 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package org.thingsboard.server.dao.event;
 
+import com.google.common.util.concurrent.ListenableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,7 +23,7 @@ import org.springframework.stereotype.Service;
 import org.thingsboard.server.common.data.Event;
 import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.data.page.TimePageData;
+import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.page.TimePageLink;
 import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.service.DataValidator;
@@ -39,13 +40,19 @@ public class BaseEventService implements EventService {
 
     @Override
     public Event save(Event event) {
-        eventValidator.validate(event);
-        return eventDao.save(event);
+        eventValidator.validate(event, Event::getTenantId);
+        return eventDao.save(event.getTenantId(), event);
+    }
+
+    @Override
+    public ListenableFuture<Event> saveAsync(Event event) {
+        eventValidator.validate(event, Event::getTenantId);
+        return eventDao.saveAsync(event);
     }
 
     @Override
     public Optional<Event> saveIfNotExists(Event event) {
-        eventValidator.validate(event);
+        eventValidator.validate(event, Event::getTenantId);
         if (StringUtils.isEmpty(event.getUid())) {
             throw new DataValidationException("Event uid should be specified!.");
         }
@@ -71,21 +78,39 @@ public class BaseEventService implements EventService {
     }
 
     @Override
-    public TimePageData<Event> findEvents(TenantId tenantId, EntityId entityId, TimePageLink pageLink) {
-        List<Event> events = eventDao.findEvents(tenantId.getId(), entityId, pageLink);
-        return new TimePageData<>(events, pageLink);
+    public PageData<Event> findEvents(TenantId tenantId, EntityId entityId, TimePageLink pageLink) {
+        return eventDao.findEvents(tenantId.getId(), entityId, pageLink);
     }
 
     @Override
-    public TimePageData<Event> findEvents(TenantId tenantId, EntityId entityId, String eventType, TimePageLink pageLink) {
-        List<Event> events = eventDao.findEvents(tenantId.getId(), entityId, eventType, pageLink);
-        return new TimePageData<>(events, pageLink);
+    public PageData<Event> findEvents(TenantId tenantId, EntityId entityId, String eventType, TimePageLink pageLink) {
+        return eventDao.findEvents(tenantId.getId(), entityId, eventType, pageLink);
+    }
+
+    @Override
+    public List<Event> findLatestEvents(TenantId tenantId, EntityId entityId, String eventType, int limit) {
+        return eventDao.findLatestEvents(tenantId.getId(), entityId, eventType, limit);
+    }
+
+    @Override
+    public void removeEvents(TenantId tenantId, EntityId entityId) {
+        PageData<Event> eventPageData;
+        TimePageLink eventPageLink = new TimePageLink(1000);
+        do {
+            eventPageData = findEvents(tenantId, entityId, eventPageLink);
+            for (Event event : eventPageData.getData()) {
+                eventDao.removeById(tenantId, event.getUuidId());
+            }
+            if (eventPageData.hasNext()) {
+                eventPageLink = eventPageLink.nextPageLink();
+            }
+        } while (eventPageData.hasNext());
     }
 
     private DataValidator<Event> eventValidator =
             new DataValidator<Event>() {
                 @Override
-                protected void validateDataImpl(Event event) {
+                protected void validateDataImpl(TenantId tenantId, Event event) {
                     if (event.getEntityId() == null) {
                         throw new DataValidationException("Entity id should be specified!.");
                     }
