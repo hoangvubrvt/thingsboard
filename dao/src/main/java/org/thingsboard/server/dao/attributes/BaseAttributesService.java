@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,81 +15,124 @@
  */
 package org.thingsboard.server.dao.attributes;
 
-import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.Pair;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
+import org.thingsboard.server.common.data.AttributeScope;
+import org.thingsboard.server.common.data.StringUtils;
+import org.thingsboard.server.common.data.id.DeviceProfileId;
 import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.kv.AttributeKvEntry;
-import org.thingsboard.server.dao.exception.IncorrectParameterException;
 import org.thingsboard.server.dao.service.Validator;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.thingsboard.server.dao.attributes.AttributeUtils.validate;
 
 /**
  * @author Andrew Shvayka
  */
 @Service
+@ConditionalOnProperty(prefix = "cache.attributes", value = "enabled", havingValue = "false", matchIfMissing = true)
+@Primary
+@Slf4j
 public class BaseAttributesService implements AttributesService {
+    private final AttributesDao attributesDao;
 
-    @Autowired
-    private AttributesDao attributesDao;
+    @Value("${sql.attributes.value_no_xss_validation:false}")
+    private boolean valueNoXssValidation;
 
-    @Override
-    public ListenableFuture<Optional<AttributeKvEntry>> find(TenantId tenantId, EntityId entityId, String scope, String attributeKey) {
-        validate(entityId, scope);
-        Validator.validateString(attributeKey, "Incorrect attribute key " + attributeKey);
-        return attributesDao.find(tenantId, entityId, scope, attributeKey);
+    public BaseAttributesService(AttributesDao attributesDao) {
+        this.attributesDao = attributesDao;
     }
 
     @Override
-    public ListenableFuture<List<AttributeKvEntry>> find(TenantId tenantId, EntityId entityId, String scope, Collection<String> attributeKeys) {
+    public ListenableFuture<Optional<AttributeKvEntry>> find(TenantId tenantId, EntityId entityId, AttributeScope scope, String attributeKey) {
         validate(entityId, scope);
-        attributeKeys.forEach(attributeKey -> Validator.validateString(attributeKey, "Incorrect attribute key " + attributeKey));
-        return attributesDao.find(tenantId, entityId, scope, attributeKeys);
+        Validator.validateString(attributeKey, k -> "Incorrect attribute key " + k);
+        return Futures.immediateFuture(attributesDao.find(tenantId, entityId, scope, attributeKey));
     }
 
     @Override
-    public ListenableFuture<List<AttributeKvEntry>> findAll(TenantId tenantId, EntityId entityId, String scope) {
+    public ListenableFuture<List<AttributeKvEntry>> find(TenantId tenantId, EntityId entityId, AttributeScope scope, Collection<String> attributeKeys) {
         validate(entityId, scope);
-        return attributesDao.findAll(tenantId, entityId, scope);
+        attributeKeys.forEach(attributeKey -> Validator.validateString(attributeKey, k -> "Incorrect attribute key " + k));
+        return Futures.immediateFuture(attributesDao.find(tenantId, entityId, scope, attributeKeys));
     }
 
     @Override
-    public ListenableFuture<List<Void>> save(TenantId tenantId, EntityId entityId, String scope, List<AttributeKvEntry> attributes) {
+    public ListenableFuture<List<AttributeKvEntry>> findAll(TenantId tenantId, EntityId entityId, AttributeScope scope) {
         validate(entityId, scope);
-        attributes.forEach(attribute -> validate(attribute));
-        List<ListenableFuture<Void>> futures = Lists.newArrayListWithExpectedSize(attributes.size());
-        for (AttributeKvEntry attribute : attributes) {
-            futures.add(attributesDao.save(tenantId, entityId, scope, attribute));
-        }
-        return Futures.allAsList(futures);
+        return Futures.immediateFuture(attributesDao.findAll(tenantId, entityId, scope));
     }
 
     @Override
-    public ListenableFuture<List<Void>> removeAll(TenantId tenantId, EntityId entityId, String scope, List<String> keys) {
-        validate(entityId, scope);
-        return attributesDao.removeAll(tenantId, entityId, scope, keys);
+    public List<String> findAllKeysByDeviceProfileId(TenantId tenantId, DeviceProfileId deviceProfileId) {
+        return attributesDao.findAllKeysByDeviceProfileId(tenantId, deviceProfileId);
     }
 
-    private static void validate(EntityId id, String scope) {
-        Validator.validateId(id.getId(), "Incorrect id " + id);
-        Validator.validateString(scope, "Incorrect scope " + scope);
+    @Override
+    public List<String> findAllKeysByEntityIds(TenantId tenantId, List<EntityId> entityIds) {
+        return attributesDao.findAllKeysByEntityIds(tenantId, entityIds);
     }
 
-    private static void validate(AttributeKvEntry kvEntry) {
-        if (kvEntry == null) {
-            throw new IncorrectParameterException("Key value entry can't be null");
-        } else if (kvEntry.getDataType() == null) {
-            throw new IncorrectParameterException("Incorrect kvEntry. Data type can't be null");
+    @Override
+    public List<String> findAllKeysByEntityIds(TenantId tenantId, List<EntityId> entityIds, String scope) {
+        if (StringUtils.isEmpty(scope)) {
+            return attributesDao.findAllKeysByEntityIds(tenantId, entityIds);
         } else {
-            Validator.validateString(kvEntry.getKey(), "Incorrect kvEntry. Key can't be empty");
-            Validator.validatePositiveNumber(kvEntry.getLastUpdateTs(), "Incorrect last update ts. Ts should be positive");
+            return attributesDao.findAllKeysByEntityIdsAndAttributeType(tenantId, entityIds, scope);
         }
+    }
+
+    @Override
+    public ListenableFuture<Long> save(TenantId tenantId, EntityId entityId, AttributeScope scope, AttributeKvEntry attribute) {
+        validate(entityId, scope);
+        AttributeUtils.validate(attribute, valueNoXssValidation);
+        return attributesDao.save(tenantId, entityId, scope, attribute);
+    }
+
+    @Override
+    public ListenableFuture<List<Long>> save(TenantId tenantId, EntityId entityId, String scope, List<AttributeKvEntry> attributes) {
+        validate(entityId, scope);
+        AttributeUtils.validate(attributes, valueNoXssValidation);
+        List<ListenableFuture<Long>> saveFutures = attributes.stream().map(attribute -> attributesDao.save(tenantId, entityId, AttributeScope.valueOf(scope), attribute)).collect(Collectors.toList());
+        return Futures.allAsList(saveFutures);
+    }
+
+    @Override
+    public ListenableFuture<List<Long>> save(TenantId tenantId, EntityId entityId, AttributeScope scope, List<AttributeKvEntry> attributes) {
+        validate(entityId, scope);
+        AttributeUtils.validate(attributes, valueNoXssValidation);
+        List<ListenableFuture<Long>> saveFutures = attributes.stream().map(attribute -> attributesDao.save(tenantId, entityId, scope, attribute)).collect(Collectors.toList());
+        return Futures.allAsList(saveFutures);
+    }
+
+    @Override
+    public ListenableFuture<List<String>> removeAll(TenantId tenantId, EntityId entityId, String scope, List<String> attributeKeys) {
+        validate(entityId, scope);
+        return Futures.allAsList(attributesDao.removeAll(tenantId, entityId, AttributeScope.valueOf(scope), attributeKeys));
+    }
+
+    @Override
+    public ListenableFuture<List<String>> removeAll(TenantId tenantId, EntityId entityId, AttributeScope scope, List<String> attributeKeys) {
+        validate(entityId, scope);
+        return Futures.allAsList(attributesDao.removeAll(tenantId, entityId, scope, attributeKeys));
+    }
+
+    @Override
+    public int removeAllByEntityId(TenantId tenantId, EntityId entityId) {
+        List<Pair<AttributeScope, String>> deleted = attributesDao.removeAllByEntityId(tenantId, entityId);
+        return deleted.size();
     }
 
 }

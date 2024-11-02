@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -34,16 +34,6 @@
  * BROWSER POLYFILLS
  */
 
-/** IE10 and IE11 requires the following for NgClass support on SVG elements */
-// import 'classlist.js';  // Run `npm install --save classlist.js`.
-
-/**
- * Web Animations `@angular/platform-browser/animations`
- * Only required if AnimationBuilder is used within the application and using IE/Edge or Safari.
- * Standard animation support in Angular DOES NOT require any polyfills (as of Angular 6.0).
- */
-// import 'web-animations-js';  // Run `npm install --save web-animations-js`.
-
 /**
  * By default, zone.js will patch all possible macroTask and DomEvents
  * user can disable parts of macroTask/DomEvents patch by setting following flags
@@ -73,9 +63,8 @@
  */
 
 import './zone-flags';
-import 'zone.js/dist/zone';  // Included with Angular CLI.
+import 'zone.js';  // Included with Angular CLI.
 import 'core-js/es/array';
-import moment from 'moment';
 
 /***************************************************************************************************
  * APPLICATION IMPORTS
@@ -87,26 +76,4 @@ import moment from 'moment';
  * WIDGETS IMPORTS
  */
 
-import cssjs from '@core/css/css';
-import { TbFlot } from '@home/components/widget/lib/flot-widget';
-import { TbAnalogueCompass } from '@home/components/widget/lib/analogue-compass';
-import { TbAnalogueRadialGauge } from '@home/components/widget/lib/analogue-radial-gauge';
-import { TbAnalogueLinearGauge } from '@home/components/widget/lib/analogue-linear-gauge';
-import { TbCanvasDigitalGauge } from '@home/components/widget/lib/digital-gauge';
-import { TbMapWidgetV2 } from '@home/components/widget/lib/maps/map-widget2';
-import { TbTripAnimationWidget } from '@app/modules/home/components/widget/trip-animation/trip-animation.component';
-
-import * as tinycolor_ from 'tinycolor2';
-
-const tinycolor = tinycolor_;
-
-(window as any).tinycolor = tinycolor;
-(window as any).cssjs = cssjs;
-(window as any).moment = moment;
-(window as any).TbFlot = TbFlot;
-(window as any).TbAnalogueCompass = TbAnalogueCompass;
-(window as any).TbAnalogueRadialGauge = TbAnalogueRadialGauge;
-(window as any).TbAnalogueLinearGauge = TbAnalogueLinearGauge;
-(window as any).TbCanvasDigitalGauge = TbCanvasDigitalGauge;
-(window as any).TbMapWidgetV2 = TbMapWidgetV2;
-(window as any).TbTripAnimationWidget = TbTripAnimationWidget;
+(window as any).GAUGES_NO_AUTO_INIT = true;

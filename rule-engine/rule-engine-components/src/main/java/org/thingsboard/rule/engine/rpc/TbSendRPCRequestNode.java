@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,19 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.StringUtils;
-import org.thingsboard.rule.engine.api.util.TbNodeUtils;
 import org.thingsboard.rule.engine.api.RuleEngineDeviceRpcRequest;
 import org.thingsboard.rule.engine.api.RuleNode;
 import org.thingsboard.rule.engine.api.TbContext;
 import org.thingsboard.rule.engine.api.TbNode;
 import org.thingsboard.rule.engine.api.TbNodeConfiguration;
 import org.thingsboard.rule.engine.api.TbNodeException;
-import org.thingsboard.rule.engine.api.TbRelationTypes;
+import org.thingsboard.rule.engine.api.util.TbNodeUtils;
 import org.thingsboard.server.common.data.DataConstants;
 import org.thingsboard.server.common.data.EntityType;
+import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.id.DeviceId;
+import org.thingsboard.server.common.data.msg.TbMsgType;
+import org.thingsboard.server.common.data.msg.TbNodeConnectionType;
 import org.thingsboard.server.common.data.plugin.ComponentType;
 import org.thingsboard.server.common.msg.TbMsg;
 
@@ -56,7 +57,6 @@ public class TbSendRPCRequestNode implements TbNode {
 
     private Random random = new Random();
     private Gson gson = new Gson();
-    private JsonParser jsonParser = new JsonParser();
     private TbSendRpcRequestNodeConfiguration config;
 
     @Override
@@ -66,7 +66,7 @@ public class TbSendRPCRequestNode implements TbNode {
 
     @Override
     public void onMsg(TbContext ctx, TbMsg msg) {
-        JsonObject json = jsonParser.parse(msg.getData()).getAsJsonObject();
+        JsonObject json = JsonParser.parseString(msg.getData()).getAsJsonObject();
         String tmp;
         if (msg.getOriginator().getEntityType() != EntityType.DEVICE) {
             ctx.tellFailure(msg, new RuntimeException("Message originator is not a device entity!"));
@@ -76,26 +76,27 @@ public class TbSendRPCRequestNode implements TbNode {
             ctx.tellFailure(msg, new RuntimeException("Params are not present in the message!"));
         } else {
             int requestId = json.has("requestId") ? json.get("requestId").getAsInt() : random.nextInt();
-            boolean restApiCall = msg.getType().equals(DataConstants.RPC_CALL_FROM_SERVER_TO_DEVICE);
+            boolean restApiCall = msg.isTypeOf(TbMsgType.RPC_CALL_FROM_SERVER_TO_DEVICE);
 
             tmp = msg.getMetaData().getValue("oneway");
             boolean oneway = !StringUtils.isEmpty(tmp) && Boolean.parseBoolean(tmp);
+
+            tmp = msg.getMetaData().getValue(DataConstants.PERSISTENT);
+            boolean persisted = !StringUtils.isEmpty(tmp) && Boolean.parseBoolean(tmp);
 
             tmp = msg.getMetaData().getValue("requestUUID");
             UUID requestUUID = !StringUtils.isEmpty(tmp) ? UUID.fromString(tmp) : Uuids.timeBased();
             tmp = msg.getMetaData().getValue("originServiceId");
             String originServiceId = !StringUtils.isEmpty(tmp) ? tmp : null;
 
-            tmp = msg.getMetaData().getValue("expirationTime");
+            tmp = msg.getMetaData().getValue(DataConstants.EXPIRATION_TIME);
             long expirationTime = !StringUtils.isEmpty(tmp) ? Long.parseLong(tmp) : (System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(config.getTimeoutInSeconds()));
 
-            String params;
-            JsonElement paramsEl = json.get("params");
-            if (paramsEl.isJsonPrimitive()) {
-                params = paramsEl.getAsString();
-            } else {
-                params = gson.toJson(paramsEl);
-            }
+            tmp = msg.getMetaData().getValue(DataConstants.RETRIES);
+            Integer retries = !StringUtils.isEmpty(tmp) ? Integer.parseInt(tmp) : null;
+
+            String params = parseJsonData(json.get("params"));
+            String additionalInfo = parseJsonData(json.get(DataConstants.ADDITIONAL_INFO));
 
             RuleEngineDeviceRpcRequest request = RuleEngineDeviceRpcRequest.builder()
                     .oneway(oneway)
@@ -107,30 +108,37 @@ public class TbSendRPCRequestNode implements TbNode {
                     .requestUUID(requestUUID)
                     .originServiceId(originServiceId)
                     .expirationTime(expirationTime)
+                    .retries(retries)
                     .restApiCall(restApiCall)
+                    .persisted(persisted)
+                    .additionalInfo(additionalInfo)
                     .build();
 
             ctx.getRpcService().sendRpcRequestToDevice(request, ruleEngineDeviceRpcResponse -> {
-                if (!ruleEngineDeviceRpcResponse.getError().isPresent()) {
-                    TbMsg next = ctx.newMsg(msg.getQueueName(), msg.getType(), msg.getOriginator(), msg.getMetaData(), ruleEngineDeviceRpcResponse.getResponse().orElse("{}"));
-                    ctx.enqueueForTellNext(next, TbRelationTypes.SUCCESS);
+                if (ruleEngineDeviceRpcResponse.getError().isEmpty()) {
+                    TbMsg next = ctx.newMsg(msg.getQueueName(), msg.getType(), msg.getOriginator(), msg.getCustomerId(), msg.getMetaData(), ruleEngineDeviceRpcResponse.getResponse().orElse(TbMsg.EMPTY_JSON_OBJECT));
+                    ctx.enqueueForTellNext(next, TbNodeConnectionType.SUCCESS);
                 } else {
-                    TbMsg next = ctx.newMsg(msg.getQueueName(), msg.getType(), msg.getOriginator(), msg.getMetaData(), wrap("error", ruleEngineDeviceRpcResponse.getError().get().name()));
-                    ctx.tellFailure(next, new RuntimeException(ruleEngineDeviceRpcResponse.getError().get().name()));
+                    TbMsg next = ctx.newMsg(msg.getQueueName(), msg.getType(), msg.getOriginator(), msg.getCustomerId(), msg.getMetaData(), wrap("error", ruleEngineDeviceRpcResponse.getError().get().name()));
+                    ctx.enqueueForTellFailure(next, ruleEngineDeviceRpcResponse.getError().get().name());
                 }
             });
             ctx.ack(msg);
         }
     }
 
-    @Override
-    public void destroy() {
-    }
-
     private String wrap(String name, String body) {
         JsonObject json = new JsonObject();
         json.addProperty(name, body);
         return gson.toJson(json);
+    }
+
+    private String parseJsonData(JsonElement paramsEl) {
+        if (paramsEl != null) {
+            return paramsEl.isJsonPrimitive() ? paramsEl.getAsString() : gson.toJson(paramsEl);
+        } else {
+            return null;
+        }
     }
 
 }

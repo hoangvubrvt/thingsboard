@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,28 @@ import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.msg.queue.ServiceType;
 import org.thingsboard.server.common.msg.queue.TopicPartitionInfo;
 import org.thingsboard.server.gen.transport.TransportProtos;
+import org.thingsboard.server.queue.discovery.event.PartitionChangeEvent;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Once application is ready or cluster topology changes, this Service will produce {@link PartitionChangeEvent}
  */
 public interface PartitionService {
 
+    TopicPartitionInfo resolve(ServiceType serviceType, String queueName, TenantId tenantId, EntityId entityId);
+
+    TopicPartitionInfo resolve(ServiceType serviceType, String queueName, TenantId tenantId, EntityId entityId, Integer partition);
+
     TopicPartitionInfo resolve(ServiceType serviceType, TenantId tenantId, EntityId entityId);
 
-    TopicPartitionInfo resolve(ServiceType serviceType, String queueName, TenantId tenantId, EntityId entityId);
+    List<TopicPartitionInfo> resolveAll(ServiceType serviceType, String queueName, TenantId tenantId, EntityId entityId);
+
+    boolean isMyPartition(ServiceType serviceType, TenantId tenantId, EntityId entityId);
+
+    List<Integer> getMyPartitions(QueueKey queueKey);
 
     /**
      * Received from the Discovery service when network topology is changed.
@@ -47,12 +57,22 @@ public interface PartitionService {
      */
     Set<String> getAllServiceIds(ServiceType serviceType);
 
-    /**
-     * Each Service should start a consumer for messages that target individual service instance based on serviceId.
-     * This topic is likely to have single partition, and is always assigned to the service.
-     * @param serviceType
-     * @param serviceId
-     * @return
-     */
-    TopicPartitionInfo getNotificationsTopic(ServiceType serviceType, String serviceId);
+    Set<TransportProtos.ServiceInfo> getAllServices(ServiceType serviceType);
+
+    Set<TransportProtos.ServiceInfo> getOtherServices(ServiceType serviceType);
+
+    int resolvePartitionIndex(UUID entityId, int partitions);
+
+    void evictTenantInfo(TenantId tenantId);
+
+    int countTransportsByType(String type);
+
+    void updateQueues(List<TransportProtos.QueueUpdateMsg> queueUpdateMsgs);
+
+    void removeQueues(List<TransportProtos.QueueDeleteMsg> queueDeleteMsgs);
+
+    void removeTenant(TenantId tenantId);
+
+    boolean isManagedByCurrentService(TenantId tenantId);
+
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.microsoft.azure.servicebus.primitives.MessagingEntityAlreadyExistsExc
 import com.microsoft.azure.servicebus.primitives.ServiceBusException;
 import lombok.extern.slf4j.Slf4j;
 import org.thingsboard.server.queue.TbQueueAdmin;
+import org.thingsboard.server.queue.util.PropertyUtils;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -30,6 +31,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
+@Deprecated(forRemoval = true, since = "3.9") // for removal in 4.0
 public class TbServiceBusAdmin implements TbQueueAdmin {
     private final String MAX_SIZE = "maxSizeInMb";
     private final String MESSAGE_TIME_TO_LIVE = "messageTimeToLiveInSec";
@@ -60,7 +62,7 @@ public class TbServiceBusAdmin implements TbQueueAdmin {
     }
 
     @Override
-    public void createTopicIfNotExists(String topic) {
+    public void createTopicIfNotExists(String topic, String properties) {
         if (queues.contains(topic)) {
             return;
         }
@@ -68,7 +70,7 @@ public class TbServiceBusAdmin implements TbQueueAdmin {
         try {
             QueueDescription queueDescription = new QueueDescription(topic);
             queueDescription.setRequiresDuplicateDetection(false);
-            setQueueConfigs(queueDescription);
+            setQueueConfigs(queueDescription, PropertyUtils.getProps(queueConfigs, properties));
 
             client.createQueue(queueDescription);
             queues.add(topic);
@@ -82,7 +84,32 @@ public class TbServiceBusAdmin implements TbQueueAdmin {
         }
     }
 
-    private void setQueueConfigs(QueueDescription queueDescription) {
+    @Override
+    public void deleteTopic(String topic) {
+        if (queues.contains(topic)) {
+            doDelete(topic);
+        } else {
+            try {
+                if (client.getQueue(topic) != null) {
+                    doDelete(topic);
+                } else {
+                    log.warn("Azure Service Bus Queue [{}] is not exist.", topic);
+                }
+            } catch (ServiceBusException | InterruptedException e) {
+                log.error("Failed to delete Azure Service Bus queue [{}]", topic, e);
+            }
+        }
+    }
+
+    private void doDelete(String topic) {
+        try {
+            client.deleteTopic(topic);
+        } catch (ServiceBusException | InterruptedException e) {
+            log.error("Failed to delete Azure Service Bus queue [{}]", topic, e);
+        }
+    }
+
+    private void setQueueConfigs(QueueDescription queueDescription, Map<String, String> queueConfigs) {
         queueConfigs.forEach((confKey, confValue) -> {
             switch (confKey) {
                 case MAX_SIZE:

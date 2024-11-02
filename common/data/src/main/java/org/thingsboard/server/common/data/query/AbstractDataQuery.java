@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import lombok.ToString;
 
 import java.util.List;
 
-@ToString
+@ToString(callSuper = true)
 public abstract class AbstractDataQuery<T extends EntityDataPageLink> extends EntityCountQuery {
 
     @Getter
@@ -29,15 +29,13 @@ public abstract class AbstractDataQuery<T extends EntityDataPageLink> extends En
     protected List<EntityKey> entityFields;
     @Getter
     protected List<EntityKey> latestValues;
-    @Getter
-    protected List<KeyFilter> keyFilters;
 
     public AbstractDataQuery() {
         super();
     }
 
-    public AbstractDataQuery(EntityFilter entityFilter) {
-        super(entityFilter);
+    public AbstractDataQuery(EntityFilter entityFilter, List<KeyFilter> keyFilters) {
+        super(entityFilter, keyFilters);
     }
 
     public AbstractDataQuery(EntityFilter entityFilter,
@@ -45,11 +43,10 @@ public abstract class AbstractDataQuery<T extends EntityDataPageLink> extends En
                              List<EntityKey> entityFields,
                              List<EntityKey> latestValues,
                              List<KeyFilter> keyFilters) {
-        super(entityFilter);
+        super(entityFilter, keyFilters);
         this.pageLink = pageLink;
         this.entityFields = entityFields;
         this.latestValues = latestValues;
-        this.keyFilters = keyFilters;
     }
 
 }

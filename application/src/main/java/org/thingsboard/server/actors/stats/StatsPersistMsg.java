@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,13 +28,18 @@ import org.thingsboard.server.common.msg.TbActorMsg;
 @ToString
 public final class StatsPersistMsg implements TbActorMsg {
 
-    private long messagesProcessed;
-    private long errorsOccurred;
-    private TenantId tenantId;
-    private EntityId entityId;
+    private final long messagesProcessed;
+    private final long errorsOccurred;
+    private final TenantId tenantId;
+    private final EntityId entityId;
 
     @Override
     public MsgType getMsgType() {
         return MsgType.STATS_PERSIST_MSG;
     }
+
+    public boolean isEmpty() {
+        return messagesProcessed == 0 && errorsOccurred == 0;
+    }
+
 }

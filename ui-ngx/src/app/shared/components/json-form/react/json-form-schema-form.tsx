@@ -1,5 +1,5 @@
 /*
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,20 +33,28 @@ import ThingsboardCheckbox from './json-form-checkbox';
 import ThingsboardHelp from './json-form-help';
 import ThingsboardFieldSet from './json-form-fieldset';
 import ThingsboardIcon from './json-form-icon';
-import { JsonFormData, JsonFormProps, onChangeFn, OnColorClickFn, OnIconClickFn } from './json-form.models';
+import {
+  JsonFormData,
+  JsonFormProps,
+  onChangeFn,
+  OnColorClickFn, onHelpClickFn,
+  OnIconClickFn,
+  onToggleFullscreenFn
+} from './json-form.models';
 
 import _ from 'lodash';
-import * as tinycolor_ from 'tinycolor2';
+import tinycolor from 'tinycolor2';
 import { GroupInfo } from '@shared/models/widget.models';
-
-const tinycolor = tinycolor_;
+import ThingsboardMarkdown from '@shared/components/json-form/react/json-form-markdown';
+import { MouseEvent, ReactNode } from 'react';
 
 class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
 
   private hasConditions: boolean;
+  private conditionFunction: Function;
   private readonly mapper: {[type: string]: any};
 
-  constructor(props) {
+  constructor(props: JsonFormProps) {
     super(props);
 
     this.mapper = {
@@ -65,6 +73,7 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
       json: ThingsboardJson,
       html: ThingsboardHtml,
       css: ThingsboardCss,
+      markdown: ThingsboardMarkdown,
       color: ThingsboardColor,
       'rc-select': ThingsboardRcSelect,
       fieldset: ThingsboardFieldSet,
@@ -75,6 +84,7 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
     this.onColorClick = this.onColorClick.bind(this);
     this.onIconClick = this.onIconClick.bind(this);
     this.onToggleFullscreen = this.onToggleFullscreen.bind(this);
+    this.onHelpClick = this.onHelpClick.bind(this);
     this.hasConditions = false;
   }
 
@@ -91,12 +101,16 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
   }
 
   onIconClick(key: (string | number)[], val: string,
-               iconSelectedFn: (icon: string) => void) {
+              iconSelectedFn: (icon: string) => void) {
     this.props.onIconClick(key, val, iconSelectedFn);
   }
 
-  onToggleFullscreen(element: HTMLElement, fullscreenFinishFn?: () => void) {
-    this.props.onToggleFullscreen(element, fullscreenFinishFn);
+  onToggleFullscreen(fullscreenFinishFn?: (el: Element) => void) {
+    this.props.onToggleFullscreen(fullscreenFinishFn);
+  }
+
+  onHelpClick(event: MouseEvent, helpId: string, helpVisibleFn: (visible: boolean) => void, helpReadyFn: (ready: boolean) => void) {
+    this.props.onHelpClick(event, helpId, helpVisibleFn, helpReadyFn);
   }
 
 
@@ -106,8 +120,9 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
           onChange: onChangeFn,
           onColorClick: OnColorClickFn,
           onIconClick: OnIconClickFn,
-          onToggleFullscreen: () => void,
-          mapper: {[type: string]: any}): JSX.Element {
+          onToggleFullscreen: onToggleFullscreenFn,
+          onHelpClick: onHelpClickFn,
+          mapper: {[type: string]: any}): React.JSX.Element {
     const type = form.type;
     const Field = this.mapper[type];
     if (!Field) {
@@ -116,8 +131,10 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
     }
     if (form.condition) {
       this.hasConditions = true;
-      // tslint:disable-next-line:no-eval
-      if (eval(form.condition) === false) {
+      if (!this.conditionFunction) {
+        this.conditionFunction = new Function('form', 'model', 'index', `return ${form.condition};`);
+      }
+      if (this.conditionFunction(form, model, index) === false) {
         return null;
       }
     }
@@ -125,18 +142,19 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
                   onColorClick={onColorClick}
                   onIconClick={onIconClick}
                   onToggleFullscreen={onToggleFullscreen}
+                  onHelpClick={onHelpClick}
                   mapper={mapper} builder={this.builder}/>;
   }
 
-  createSchema(theForm: any[]): JSX.Element {
+  createSchema(theForm: any[]): React.JSX.Element {
     const merged = JsonFormUtils.merge(this.props.schema, theForm, this.props.ignore, this.props.option);
     let mapper = this.mapper;
     if (this.props.mapper) {
       mapper = _.merge(this.mapper, this.props.mapper);
     }
-    const forms = merged.map(function(form, index) {
+    const forms: ReactNode[] = merged.map(function(form: JsonFormData, index: number) {
       return this.builder(form, this.props.model, index, this.onChange, this.onColorClick,
-        this.onIconClick, this.onToggleFullscreen, mapper);
+        this.onIconClick, this.onToggleFullscreen, this.onHelpClick, mapper);
     }.bind(this));
 
     let formClass = 'SchemaForm';
@@ -151,7 +169,7 @@ class ThingsboardSchemaForm extends React.Component<JsonFormProps, any> {
 
   render() {
     if (this.props.groupInfoes && this.props.groupInfoes.length > 0) {
-      const content: JSX.Element[] = [];
+      const content: React.JSX.Element[] = [];
       for (const info of this.props.groupInfoes) {
         const forms = this.createSchema(this.props.form[info.formIndex]);
         const item = <ThingsboardSchemaGroup key={content.length} forms={forms} info={info}></ThingsboardSchemaGroup>;
@@ -167,7 +185,7 @@ export default ThingsboardSchemaForm;
 
 interface ThingsboardSchemaGroupProps {
   info: GroupInfo;
-  forms: JSX.Element;
+  forms: React.JSX.Element;
 }
 
 interface ThingsboardSchemaGroupState {
@@ -175,14 +193,14 @@ interface ThingsboardSchemaGroupState {
 }
 
 class ThingsboardSchemaGroup extends React.Component<ThingsboardSchemaGroupProps, ThingsboardSchemaGroupState> {
-  constructor(props) {
+  constructor(props: ThingsboardSchemaGroupProps) {
     super(props);
     this.state = {
       showGroup: true
     };
   }
 
-  toogleGroup(index) {
+  toogleGroup() {
     this.setState({
       showGroup: !this.state.showGroup
     });

@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,22 +15,27 @@
  */
 package org.thingsboard.server.dao.sql.device;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.security.DeviceCredentials;
 import org.thingsboard.server.dao.DaoUtil;
 import org.thingsboard.server.dao.device.DeviceCredentialsDao;
 import org.thingsboard.server.dao.model.sql.DeviceCredentialsEntity;
 import org.thingsboard.server.dao.sql.JpaAbstractDao;
+import org.thingsboard.server.dao.util.SqlDao;
 
 import java.util.UUID;
 
 /**
  * Created by Valerii Sosliuk on 5/6/2017.
  */
+@Slf4j
 @Component
+@SqlDao
 public class JpaDeviceCredentialsDao extends JpaAbstractDao<DeviceCredentialsEntity, DeviceCredentials> implements DeviceCredentialsDao {
 
     @Autowired
@@ -42,7 +47,7 @@ public class JpaDeviceCredentialsDao extends JpaAbstractDao<DeviceCredentialsEnt
     }
 
     @Override
-    protected CrudRepository<DeviceCredentialsEntity, UUID> getCrudRepository() {
+    protected JpaRepository<DeviceCredentialsEntity, UUID> getRepository() {
         return deviceCredentialsRepository;
     }
 
@@ -53,6 +58,13 @@ public class JpaDeviceCredentialsDao extends JpaAbstractDao<DeviceCredentialsEnt
 
     @Override
     public DeviceCredentials findByCredentialsId(TenantId tenantId, String credentialsId) {
+        log.trace("[{}] findByCredentialsId [{}]", tenantId, credentialsId);
         return DaoUtil.getData(deviceCredentialsRepository.findByCredentialsId(credentialsId));
     }
+
+    @Override
+    public DeviceCredentials removeByDeviceId(TenantId tenantId, DeviceId deviceId) {
+        return DaoUtil.getData(deviceCredentialsRepository.deleteByDeviceId(deviceId.getId()));
+    }
+
 }

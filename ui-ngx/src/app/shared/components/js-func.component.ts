@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 ///
 
 import {
+  ChangeDetectorRef,
   Component,
   ElementRef,
   forwardRef,
@@ -24,8 +25,9 @@ import {
   ViewChild,
   ViewEncapsulation
 } from '@angular/core';
-import { ControlValueAccessor, FormControl, NG_VALIDATORS, NG_VALUE_ACCESSOR, Validator } from '@angular/forms';
-import * as ace from 'ace-builds';
+import { ControlValueAccessor, NG_VALIDATORS, NG_VALUE_ACCESSOR, UntypedFormControl, Validator } from '@angular/forms';
+import { Ace } from 'ace-builds';
+import { AceHighlightRules, getAce, Range } from '@shared/models/ace/ace.models';
 import { coerceBooleanProperty } from '@angular/cdk/coercion';
 import { ActionNotificationHide, ActionNotificationShow } from '@core/notification/notification.actions';
 import { Store } from '@ngrx/store';
@@ -34,9 +36,10 @@ import { UtilsService } from '@core/services/utils.service';
 import { guid, isUndefined } from '@app/core/utils';
 import { TranslateService } from '@ngx-translate/core';
 import { CancelAnimationFrame, RafService } from '@core/services/raf.service';
-import { ResizeObserver } from '@juggle/resize-observer';
 import { TbEditorCompleter } from '@shared/models/ace/completion.models';
-import { widgetEditorCompleter } from '@home/pages/widget/widget-editor.models';
+import { beautifyJs } from '@shared/models/beautify.models';
+import { ScriptLanguage } from '@shared/models/rule-node.models';
+import { coerceBoolean } from '@shared/decorators/coercion';
 
 @Component({
   selector: 'tb-js-func',
@@ -61,11 +64,14 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
   @ViewChild('javascriptEditor', {static: true})
   javascriptEditorElmRef: ElementRef;
 
-  private jsEditor: ace.Ace.Editor;
+  private jsEditor: Ace.Editor;
   private editorsResizeCaf: CancelAnimationFrame;
   private editorResize$: ResizeObserver;
+  private ignoreChange = false;
 
   toastTargetId = `jsFuncEditor-${guid()}`;
+
+  @Input() functionTitle: string;
 
   @Input() functionName: string;
 
@@ -79,7 +85,23 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
 
   @Input() fillHeight: boolean;
 
+  @Input() minHeight = '200px';
+
   @Input() editorCompleter: TbEditorCompleter;
+
+  @Input() highlightRules: AceHighlightRules;
+
+  @Input() globalVariables: Array<string>;
+
+  @Input() disableUndefinedCheck = false;
+
+  @Input() helpId: string;
+
+  @Input() scriptLanguage: ScriptLanguage = ScriptLanguage.JS;
+
+  @Input()
+  @coerceBoolean()
+  hideBrackets = false;
 
   private noValidateValue: boolean;
   get noValidate(): boolean {
@@ -99,7 +121,7 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
     this.requiredValue = coerceBooleanProperty(value);
   }
 
-  functionArgsString = '';
+  functionLabel: string;
 
   fullscreen = false;
 
@@ -114,16 +136,23 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
   errorMarkers: number[] = [];
   errorAnnotationId = -1;
 
+  private functionArgsString = '';
+
   private propagateChange = null;
+  public hasErrors = false;
 
   constructor(public elementRef: ElementRef,
               private utils: UtilsService,
               private translate: TranslateService,
               protected store: Store<AppState>,
-              private raf: RafService) {
+              private raf: RafService,
+              private cd: ChangeDetectorRef) {
   }
 
   ngOnInit(): void {
+    if (this.functionTitle) {
+      this.hideBrackets = true;
+    }
     if (!this.resultType || this.resultType.length === 0) {
       this.resultType = 'nocheck';
     }
@@ -135,13 +164,22 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
         this.functionArgsString += functionArg;
       });
     }
+    if (this.functionTitle) {
+      this.functionLabel = `${this.functionTitle}: f(${this.functionArgsString})`;
+    } else {
+      this.functionLabel =
+        `function ${this.functionName ? this.functionName : ''}(${this.functionArgsString})${this.hideBrackets ? '' : ' {'}`;
+    }
     const editorElement = this.javascriptEditorElmRef.nativeElement;
-    let editorOptions: Partial<ace.Ace.EditorOptions> = {
-      mode: 'ace/mode/javascript',
-      showGutter: true,
-      showPrintMargin: true,
-      readOnly: this.disabled
+    let editorOptions: Partial<Ace.EditorOptions> = {
+        mode: 'ace/mode/javascript',
+        showGutter: true,
+        showPrintMargin: true,
+        readOnly: this.disabled
     };
+    if (ScriptLanguage.TBEL === this.scriptLanguage) {
+      editorOptions.mode = 'ace/mode/tbel';
+    }
 
     const advancedOptions = {
       enableSnippets: true,
@@ -150,25 +188,86 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
     };
 
     editorOptions = {...editorOptions, ...advancedOptions};
-    this.jsEditor = ace.edit(editorElement, editorOptions);
-    this.jsEditor.session.setUseWrapMode(true);
-    this.jsEditor.setValue(this.modelValue ? this.modelValue : '', -1);
-    this.jsEditor.on('change', () => {
-      this.cleanupJsErrors();
-      this.updateView();
-    });
-    if (this.editorCompleter) {
-      this.jsEditor.completers = [this.editorCompleter, ...(this.jsEditor.completers || [])];
-    }
-    this.editorResize$ = new ResizeObserver(() => {
-      this.onAceEditorResize();
-    });
-    this.editorResize$.observe(editorElement);
+    getAce().subscribe(
+      (ace) => {
+        this.jsEditor = ace.edit(editorElement, editorOptions);
+        this.jsEditor.session.setUseWrapMode(true);
+        this.jsEditor.setValue(this.modelValue ? this.modelValue : '', -1);
+        this.jsEditor.setReadOnly(this.disabled);
+        this.jsEditor.on('change', () => {
+          if (!this.ignoreChange) {
+            this.cleanupJsErrors();
+            this.updateView();
+          }
+        });
+        if (!this.disableUndefinedCheck) {
+          // @ts-ignore
+          this.jsEditor.session.on('changeAnnotation', () => {
+            const annotations = this.jsEditor.session.getAnnotations();
+            annotations.filter(annotation => annotation.text.includes('is not defined')).forEach(annotation => {
+              annotation.type = 'error';
+            });
+            this.jsEditor.renderer.setAnnotations(annotations);
+            const hasErrors = annotations.filter(annotation => annotation.type === 'error').length > 0;
+            if (this.hasErrors !== hasErrors) {
+              this.hasErrors = hasErrors;
+              this.propagateChange(this.modelValue);
+              this.cd.markForCheck();
+            }
+          });
+        }
+        // @ts-ignore
+        if (!!this.highlightRules && !!this.jsEditor.session.$mode) {
+          // @ts-ignore
+          const newMode = new this.jsEditor.session.$mode.constructor();
+          newMode.$highlightRules = new newMode.HighlightRules();
+          for(const group in this.highlightRules) {
+            if(!!newMode.$highlightRules.$rules[group]) {
+              newMode.$highlightRules.$rules[group].unshift(...this.highlightRules[group]);
+            } else {
+              newMode.$highlightRules.$rules[group] = this.highlightRules[group];
+            }
+          }
+          // @ts-ignore
+          this.jsEditor.session.$onChangeMode(newMode);
+        }
+        // @ts-ignore
+        if (!!this.jsEditor.session.$worker) {
+          const jsWorkerOptions = {
+            undef: !this.disableUndefinedCheck,
+            unused: true,
+            globals: {}
+          };
+          if (!this.disableUndefinedCheck && this.functionArgs) {
+            this.functionArgs.forEach(arg => {
+              jsWorkerOptions.globals[arg] = false;
+            });
+          }
+          if (!this.disableUndefinedCheck && this.globalVariables) {
+            this.globalVariables.forEach(arg => {
+              jsWorkerOptions.globals[arg] = false;
+            });
+          }
+          // @ts-ignore
+          this.jsEditor.session.$worker.send('changeOptions', [jsWorkerOptions]);
+        }
+        if (this.editorCompleter) {
+          this.jsEditor.completers = [this.editorCompleter, ...(this.jsEditor.completers || [])];
+        }
+        this.editorResize$ = new ResizeObserver(() => {
+          this.onAceEditorResize();
+        });
+        this.editorResize$.observe(editorElement);
+      }
+    );
   }
 
   ngOnDestroy(): void {
     if (this.editorResize$) {
       this.editorResize$.disconnect();
+    }
+    if (this.jsEditor) {
+      this.jsEditor.destroy();
     }
   }
 
@@ -197,8 +296,8 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
     }
   }
 
-  public validate(c: FormControl) {
-    return (this.functionValid) ? null : {
+  public validate(c: UntypedFormControl) {
+    return (this.functionValid && !this.hasErrors) ? null : {
       jsFunc: {
         valid: false,
       },
@@ -206,9 +305,12 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
   }
 
   beautifyJs() {
-    const res = js_beautify(this.modelValue, {indent_size: 4, wrap_line_length: 60});
-    this.jsEditor.setValue(res ? res : '', -1);
-    this.updateView();
+    beautifyJs(this.modelValue, {indent_size: 4, wrap_line_length: 60}).subscribe(
+      (res) => {
+        this.jsEditor.setValue(res ? res : '', -1);
+        this.updateView();
+      }
+    );
   }
 
   validateOnSubmit(): void {
@@ -217,6 +319,7 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
       this.functionValid = this.validateJsFunc();
       if (!this.functionValid) {
         this.propagateChange(this.modelValue);
+        this.cd.markForCheck();
         this.store.dispatch(new ActionNotificationShow(
           {
             message: this.validationError,
@@ -228,6 +331,11 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
         this.errorShowed = true;
       }
     }
+  }
+
+  public focus() {
+    this.javascriptEditorElmRef.nativeElement.scrollIntoView();
+    this.jsEditor?.focus();
   }
 
   private validateJsFunc(): boolean {
@@ -292,11 +400,11 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
         if (details.columnNumber) {
           column = details.columnNumber;
         }
-        const errorMarkerId = this.jsEditor.session.addMarker(new ace.Range(line, 0, line, Infinity),
+        const errorMarkerId = this.jsEditor.session.addMarker(new Range(line, 0, line, Infinity),
           'ace_active-line', 'screenLine');
         this.errorMarkers.push(errorMarkerId);
         const annotations = this.jsEditor.session.getAnnotations();
-        const errorAnnotation: ace.Ace.Annotation = {
+        const errorAnnotation: Ace.Annotation = {
           row: line,
           column,
           text: details.message,
@@ -332,7 +440,9 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
   writeValue(value: string): void {
     this.modelValue = value;
     if (this.jsEditor) {
+      this.ignoreChange = true;
       this.jsEditor.setValue(this.modelValue ? this.modelValue : '', -1);
+      this.ignoreChange = false;
     }
   }
 
@@ -342,7 +452,7 @@ export class JsFuncComponent implements OnInit, OnDestroy, ControlValueAccessor,
       this.modelValue = editorValue;
       this.functionValid = true;
       this.propagateChange(this.modelValue);
+      this.cd.markForCheck();
     }
   }
-
 }

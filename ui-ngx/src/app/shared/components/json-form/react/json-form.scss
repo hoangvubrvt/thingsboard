@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@import "~compass-sass-mixins/lib/compass";
-
 $swift-ease-out-duration: .4s !default;
 $swift-ease-out-timing-function: cubic-bezier(.25, .8, .25, 1) !default;
 
@@ -178,7 +176,6 @@ $previewSize: 100px !default;
       label {
         padding: 4px;
         color: #00acc1;
-        text-transform: uppercase;
         background: rgba(220, 220, 220, .35);
         border-radius: 5px;
       }
@@ -190,6 +187,18 @@ $previewSize: 100px !default;
           padding: 0 !important;
           font-size: 12px !important;
         }
+      }
+      button.help-button {
+        background: rgba(220, 220, 220, .35);
+        padding: 4px;
+      }
+      div.help-button-loading {
+        pointer-events: none;
+        background: #f3f3f3;
+        border-radius: 50%;
+        display: flex;
+        place-content: center;
+        align-items: center;
       }
     }
   }
@@ -261,6 +270,10 @@ $previewSize: 100px !default;
     position: absolute !important;
     top: 50%;
     transform: translate(0%, -50%) !important;
+  }
+
+  .MuiButton-root {
+    text-transform: none;
   }
 
 }

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,72 +14,28 @@
 /// limitations under the License.
 ///
 
-import * as AngularCore from '@angular/core';
-import { Injectable, NgModule } from '@angular/core';
-import * as AngularRouter from '@angular/router';
-import {
-  ActivatedRouteSnapshot,
-  CanActivate,
-  Resolve,
-  Router,
-  RouterModule,
-  RouterStateSnapshot,
-  Routes,
-  UrlTree
-} from '@angular/router';
+import { Inject, Injectable, NgModule, Optional } from '@angular/core';
+import { ActivatedRouteSnapshot, Router, RouterModule, RouterStateSnapshot, Routes, UrlTree } from '@angular/router';
 
 import { EntitiesTableComponent } from '../../components/entity/entities-table.component';
 import { Authority } from '@shared/models/authority.enum';
 import { RuleChainsTableConfigResolver } from '@modules/home/pages/rulechain/rulechains-table-config.resolver';
-import * as RxJs from 'rxjs';
-import { Observable } from 'rxjs';
-import * as RxJsOperators from 'rxjs/operators';
+import { from, Observable } from 'rxjs';
 import { BreadCrumbConfig, BreadCrumbLabelFunction } from '@shared/components/breadcrumb';
-import { ResolvedRuleChainMetaData, RuleChain } from '@shared/models/rule-chain.models';
+import {
+  RuleChainMetaData,
+  RuleChain, RuleChainType
+} from '@shared/models/rule-chain.models';
 import { RuleChainService } from '@core/http/rule-chain.service';
 import { RuleChainPageComponent } from '@home/pages/rulechain/rulechain-page.component';
 import { RuleNodeComponentDescriptor } from '@shared/models/rule-node.models';
 import { ConfirmOnExitGuard } from '@core/guards/confirm-on-exit.guard';
-
-import * as AngularCommon from '@angular/common';
-import * as AngularForms from '@angular/forms';
-import * as AngularCdkCoercion from '@angular/cdk/coercion';
-import * as AngularCdkKeycodes from '@angular/cdk/keycodes';
-import * as AngularMaterialChips from '@angular/material/chips';
-import * as AngularMaterialAutocomplete from '@angular/material/autocomplete';
-import * as AngularMaterialDialog from '@angular/material/dialog';
-import * as NgrxStore from '@ngrx/store';
-import * as TranslateCore from '@ngx-translate/core';
-import * as TbCore from '@core/public-api';
-import { ItemBufferService } from '@core/public-api';
-import * as TbShared from '@shared/public-api';
-import * as TbHomeComponents from '@home/components/public-api';
-import * as _moment from 'moment';
-
-declare const SystemJS;
-
-const ruleNodeConfigResourcesModulesMap = {
-  '@angular/core': SystemJS.newModule(AngularCore),
-  '@angular/common': SystemJS.newModule(AngularCommon),
-  '@angular/forms': SystemJS.newModule(AngularForms),
-  '@angular/router': SystemJS.newModule(AngularRouter),
-  '@angular/cdk/keycodes': SystemJS.newModule(AngularCdkKeycodes),
-  '@angular/cdk/coercion': SystemJS.newModule(AngularCdkCoercion),
-  '@angular/material/chips': SystemJS.newModule(AngularMaterialChips),
-  '@angular/material/autocomplete': SystemJS.newModule(AngularMaterialAutocomplete),
-  '@angular/material/dialog': SystemJS.newModule(AngularMaterialDialog),
-  '@ngrx/store': SystemJS.newModule(NgrxStore),
-  rxjs: SystemJS.newModule(RxJs),
-  'rxjs/operators': SystemJS.newModule(RxJsOperators),
-  '@ngx-translate/core': SystemJS.newModule(TranslateCore),
-  '@core/public-api': SystemJS.newModule(TbCore),
-  '@shared/public-api': SystemJS.newModule(TbShared),
-  '@home/components/public-api': SystemJS.newModule(TbHomeComponents),
-  moment: SystemJS.newModule(_moment)
-};
+import { ItemBufferService, MenuId } from '@core/public-api';
+import { MODULES_MAP } from '@shared/public-api';
+import { IModulesMap } from '@modules/common/modules-map.models';
 
 @Injectable()
-export class RuleChainResolver implements Resolve<RuleChain> {
+export class RuleChainResolver  {
 
   constructor(private ruleChainService: RuleChainService) {
   }
@@ -91,30 +47,42 @@ export class RuleChainResolver implements Resolve<RuleChain> {
 }
 
 @Injectable()
-export class ResolvedRuleChainMetaDataResolver implements Resolve<ResolvedRuleChainMetaData> {
+export class RuleChainMetaDataResolver  {
 
   constructor(private ruleChainService: RuleChainService) {
   }
 
-  resolve(route: ActivatedRouteSnapshot): Observable<ResolvedRuleChainMetaData> {
+  resolve(route: ActivatedRouteSnapshot): Observable<RuleChainMetaData> {
     const ruleChainId = route.params.ruleChainId;
-    return this.ruleChainService.getResolvedRuleChainMetadata(ruleChainId);
+    return this.ruleChainService.getRuleChainMetadata(ruleChainId);
   }
 }
 
 @Injectable()
-export class RuleNodeComponentsResolver implements Resolve<Array<RuleNodeComponentDescriptor>> {
+export class RuleNodeComponentsResolver  {
 
-  constructor(private ruleChainService: RuleChainService) {
+  constructor(private ruleChainService: RuleChainService,
+              @Optional() @Inject(MODULES_MAP) private modulesMap: IModulesMap) {
   }
 
   resolve(route: ActivatedRouteSnapshot): Observable<Array<RuleNodeComponentDescriptor>> {
-    return this.ruleChainService.getRuleNodeComponents(ruleNodeConfigResourcesModulesMap);
+    return this.ruleChainService.getRuleNodeComponents(this.modulesMap, route.data.ruleChainType);
   }
 }
 
 @Injectable()
-export class RuleChainImportGuard implements CanActivate {
+export class TooltipsterResolver  {
+
+  constructor() {
+  }
+
+  resolve(route: ActivatedRouteSnapshot): Observable<any> {
+    return from(import('tooltipster'));
+  }
+}
+
+@Injectable()
+export class RuleChainImportGuard  {
 
   constructor(private itembuffer: ItemBufferService,
               private router: Router) {
@@ -150,8 +118,7 @@ const routes: Routes = [
     path: 'ruleChains',
     data: {
       breadcrumb: {
-        label: 'rulechain.rulechains',
-        icon: 'settings_ethernet'
+        menuId: MenuId.rule_chains
       }
     },
     children: [
@@ -160,7 +127,8 @@ const routes: Routes = [
         component: EntitiesTableComponent,
         data: {
           auth: [Authority.TENANT_ADMIN],
-          title: 'rulechain.rulechains'
+          title: 'rulechain.rulechains',
+          ruleChainsType: 'tenant'
         },
         resolve: {
           entitiesTableConfig: RuleChainsTableConfigResolver
@@ -177,12 +145,14 @@ const routes: Routes = [
           } as BreadCrumbConfig<RuleChainPageComponent>,
           auth: [Authority.TENANT_ADMIN],
           title: 'rulechain.rulechain',
-          import: false
+          import: false,
+          ruleChainType: RuleChainType.CORE
         },
         resolve: {
           ruleChain: RuleChainResolver,
-          ruleChainMetaData: ResolvedRuleChainMetaDataResolver,
-          ruleNodeComponents: RuleNodeComponentsResolver
+          ruleChainMetaData: RuleChainMetaDataResolver,
+          ruleNodeComponents: RuleNodeComponentsResolver,
+          tooltipster: TooltipsterResolver
         }
       },
       {
@@ -197,10 +167,12 @@ const routes: Routes = [
           } as BreadCrumbConfig<RuleChainPageComponent>,
           auth: [Authority.TENANT_ADMIN],
           title: 'rulechain.rulechain',
-          import: true
+          import: true,
+          ruleChainType: RuleChainType.CORE
         },
         resolve: {
-          ruleNodeComponents: RuleNodeComponentsResolver
+          ruleNodeComponents: RuleNodeComponentsResolver,
+          tooltipster: TooltipsterResolver
         }
       }
     ]
@@ -214,8 +186,9 @@ const routes: Routes = [
   providers: [
     RuleChainsTableConfigResolver,
     RuleChainResolver,
-    ResolvedRuleChainMetaDataResolver,
+    RuleChainMetaDataResolver,
     RuleNodeComponentsResolver,
+    TooltipsterResolver,
     RuleChainImportGuard
   ]
 })

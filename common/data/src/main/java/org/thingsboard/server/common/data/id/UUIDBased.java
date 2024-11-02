@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,13 @@
  */
 package org.thingsboard.server.common.data.id;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.io.Serializable;
 import java.util.UUID;
 
-public abstract class UUIDBased implements Serializable {
+@Schema
+public abstract class UUIDBased implements HasUUID, Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -33,6 +36,7 @@ public abstract class UUIDBased implements Serializable {
         this.id = id;
     }
 
+    @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "string", example = "784f394c-42b6-435a-983c-b7beff2784f9")
     public UUID getId() {
         return id;
     }
@@ -64,7 +68,7 @@ public abstract class UUIDBased implements Serializable {
 
     @Override
     public String toString() {
-        return id.toString();
+        return String.valueOf(id);
     }
 
 }

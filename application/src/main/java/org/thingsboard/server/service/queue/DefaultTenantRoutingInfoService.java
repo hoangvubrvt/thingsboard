@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ package org.thingsboard.server.service.queue;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
-import org.thingsboard.server.common.data.Tenant;
+import org.thingsboard.server.common.data.TenantProfile;
+import org.thingsboard.server.common.data.exception.TenantNotFoundException;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.dao.tenant.TenantService;
+import org.thingsboard.server.dao.tenant.TbTenantProfileCache;
 import org.thingsboard.server.queue.discovery.TenantRoutingInfo;
 import org.thingsboard.server.queue.discovery.TenantRoutingInfoService;
 
@@ -29,19 +30,19 @@ import org.thingsboard.server.queue.discovery.TenantRoutingInfoService;
 @ConditionalOnExpression("'${service.type:null}'=='monolith' || '${service.type:null}'=='tb-core' || '${service.type:null}'=='tb-rule-engine'")
 public class DefaultTenantRoutingInfoService implements TenantRoutingInfoService {
 
-    private final TenantService tenantService;
+    private final TbTenantProfileCache tenantProfileCache;
 
-    public DefaultTenantRoutingInfoService(TenantService tenantService) {
-        this.tenantService = tenantService;
+    public DefaultTenantRoutingInfoService(TbTenantProfileCache tenantProfileCache) {
+        this.tenantProfileCache = tenantProfileCache;
     }
 
     @Override
     public TenantRoutingInfo getRoutingInfo(TenantId tenantId) {
-        Tenant tenant = tenantService.findTenantById(tenantId);
-        if (tenant != null) {
-            return new TenantRoutingInfo(tenantId, tenant.isIsolatedTbCore(), tenant.isIsolatedTbRuleEngine());
+        TenantProfile tenantProfile = tenantProfileCache.get(tenantId);
+        if (tenantProfile != null) {
+            return new TenantRoutingInfo(tenantId, tenantProfile.getId(), tenantProfile.isIsolatedTbRuleEngine());
         } else {
-            throw new RuntimeException("Tenant not found!");
+            throw new TenantNotFoundException(tenantId);
         }
     }
 }

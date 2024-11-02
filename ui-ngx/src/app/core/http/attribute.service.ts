@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,8 +19,9 @@ import { defaultHttpOptionsFromConfig, RequestConfig } from './http-utils';
 import { forkJoin, Observable, of } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { EntityId } from '@shared/models/id/entity-id';
-import { AttributeData, AttributeScope } from '@shared/models/telemetry/telemetry.models';
+import { AttributeData, AttributeScope, DataSortOrder, TimeseriesData } from '@shared/models/telemetry/telemetry.models';
 import { isDefinedAndNotNull } from '@core/utils';
+import { AggregationType } from '@shared/models/time/time.models';
 
 @Injectable({
   providedIn: 'root'
@@ -31,29 +32,50 @@ export class AttributeService {
     private http: HttpClient
   ) { }
 
-  public getEntityAttributes(entityId: EntityId, attributeScope: AttributeScope,
+  public getEntityAttributes(entityId: EntityId, attributeScope?: AttributeScope,
                              keys?: Array<string>, config?: RequestConfig): Observable<Array<AttributeData>> {
-    let url = `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/attributes/${attributeScope}`;
+    let url = `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/attributes`;
+
+    if (attributeScope) {
+      url += `/${attributeScope}`;
+    }
+
     if (keys && keys.length) {
       url += `?keys=${keys.join(',')}`;
     }
+
     return this.http.get<Array<AttributeData>>(url, defaultHttpOptionsFromConfig(config));
   }
 
   public deleteEntityAttributes(entityId: EntityId, attributeScope: AttributeScope, attributes: Array<AttributeData>,
                                 config?: RequestConfig): Observable<any> {
-    const keys = attributes.map(attribute => attribute.key).join(',');
+    const keys = attributes.map(attribute => encodeURIComponent(attribute.key)).join(',');
     return this.http.delete(`/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/${attributeScope}` +
       `?keys=${keys}`,
       defaultHttpOptionsFromConfig(config));
   }
 
   public deleteEntityTimeseries(entityId: EntityId, timeseries: Array<AttributeData>, deleteAllDataForKeys = false,
+                                startTs?: number, endTs?: number, rewriteLatestIfDeleted = false, deleteLatest = true,
                                 config?: RequestConfig): Observable<any> {
-    const keys = timeseries.map(attribute => attribute.key).join(',');
-    return this.http.delete(`/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/timeseries/delete` +
-      `?keys=${keys}&deleteAllDataForKeys=${deleteAllDataForKeys}`,
-      defaultHttpOptionsFromConfig(config));
+    const keys = timeseries.map(attribute => encodeURIComponent(attribute.key)).join(',');
+    let url = `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/timeseries/delete?keys=${keys}`;
+    if (isDefinedAndNotNull(deleteAllDataForKeys)) {
+      url += `&deleteAllDataForKeys=${deleteAllDataForKeys}`;
+    }
+    if (isDefinedAndNotNull(rewriteLatestIfDeleted)) {
+      url += `&rewriteLatestIfDeleted=${rewriteLatestIfDeleted}`;
+    }
+    if (isDefinedAndNotNull(deleteLatest)) {
+      url += `&deleteLatest=${deleteLatest}`;
+    }
+    if (isDefinedAndNotNull(startTs)) {
+      url += `&startTs=${startTs}`;
+    }
+    if (isDefinedAndNotNull(endTs)) {
+      url += `&endTs=${endTs}`;
+    }
+    return this.http.delete(url, defaultHttpOptionsFromConfig(config));
   }
 
   public saveEntityAttributes(entityId: EntityId, attributeScope: AttributeScope, attributes: Array<AttributeData>,
@@ -96,7 +118,8 @@ export class AttributeService {
     });
     let deleteEntityTimeseriesObservable: Observable<any>;
     if (deleteTimeseries.length) {
-      deleteEntityTimeseriesObservable = this.deleteEntityTimeseries(entityId, deleteTimeseries, true, config);
+      deleteEntityTimeseriesObservable = this.deleteEntityTimeseries(entityId, deleteTimeseries, true,
+        null, null, false, true, config);
     } else {
       deleteEntityTimeseriesObservable = of(null);
     }
@@ -109,5 +132,38 @@ export class AttributeService {
       saveEntityTimeseriesObservable = of(null);
     }
     return forkJoin([saveEntityTimeseriesObservable, deleteEntityTimeseriesObservable]);
+  }
+
+  public getEntityTimeseries(entityId: EntityId, keys: Array<string>, startTs: number, endTs: number,
+                             limit: number = 100, agg: AggregationType = AggregationType.NONE, interval?: number,
+                             orderBy: DataSortOrder = DataSortOrder.DESC, useStrictDataTypes: boolean = false,
+                             config?: RequestConfig): Observable<TimeseriesData> {
+    let url = `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/timeseries?keys=${keys.join(',')}&startTs=${startTs}&endTs=${endTs}`;
+    if (isDefinedAndNotNull(limit)) {
+      url += `&limit=${limit}`;
+    }
+    if (isDefinedAndNotNull(agg)) {
+      url += `&agg=${agg}`;
+    }
+    if (isDefinedAndNotNull(interval)) {
+      url += `&interval=${interval}`;
+    }
+    if (isDefinedAndNotNull(orderBy)) {
+      url += `&orderBy=${orderBy}`;
+    }
+    if (isDefinedAndNotNull(useStrictDataTypes)) {
+      url += `&useStrictDataTypes=${useStrictDataTypes}`;
+    }
+
+    return this.http.get<TimeseriesData>(url, defaultHttpOptionsFromConfig(config));
+  }
+
+  public getEntityTimeseriesLatest(entityId: EntityId, keys?: Array<string>,
+                                   useStrictDataTypes = false, config?: RequestConfig): Observable<TimeseriesData> {
+    let url = `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/timeseries?useStrictDataTypes=${useStrictDataTypes}`;
+    if (isDefinedAndNotNull(keys) && keys.length) {
+      url += `&keys=${keys.join(',')}`;
+    }
+    return this.http.get<TimeseriesData>(url, defaultHttpOptionsFromConfig(config));
   }
 }

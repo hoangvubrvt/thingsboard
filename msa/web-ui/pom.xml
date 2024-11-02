@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.thingsboard</groupId>
-        <version>3.1.0-SNAPSHOT</version>
+        <version>3.9.0-SNAPSHOT</version>
         <artifactId>msa</artifactId>
     </parent>
     <groupId>org.thingsboard.msa</groupId>
@@ -44,6 +44,7 @@
         <pkg.package.phase>package</pkg.package.phase>
         <pkg.linux.dist>${project.build.directory}/package/linux</pkg.linux.dist>
         <pkg.win.dist>${project.build.directory}/package/windows</pkg.win.dist>
+        <docker.push-arm-amd-image.phase>pre-integration-test</docker.push-arm-amd-image.phase>
     </properties>
 
     <dependencies>
@@ -68,29 +69,38 @@
             <plugin>
                 <groupId>com.github.eirslett</groupId>
                 <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.0</version>
                 <configuration>
                     <installDirectory>target</installDirectory>
                     <workingDirectory>${basedir}</workingDirectory>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>install node and npm</id>
+                        <id>install node and yarn</id>
                         <goals>
-                            <goal>install-node-and-npm</goal>
+                            <goal>install-node-and-yarn</goal>
                         </goals>
                         <configuration>
-                            <nodeVersion>v10.16.0</nodeVersion>
-                            <npmVersion>6.4.1</npmVersion>
+                            <nodeVersion>v16.20.2</nodeVersion>
+                            <yarnVersion>v1.22.17</yarnVersion>
                         </configuration>
                     </execution>
                     <execution>
-                        <id>npm install</id>
+                        <id>yarn install</id>
                         <goals>
-                            <goal>npm</goal>
+                            <goal>yarn</goal>
                         </goals>
                         <configuration>
-                            <arguments>install</arguments>
+                            <arguments>install --non-interactive --network-concurrency 4 --network-timeout 100000 --mutex network</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>yarn pkg</id>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <phase>compile</phase>
+                        <configuration>
+                            <arguments>run pkg</arguments>
                         </configuration>
                     </execution>
                 </executions>
@@ -140,6 +150,28 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-src-root</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/src</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${basedir}</directory>
+                                    <includes>
+                                        <include>package.json</include>
+                                        <include>yarn.lock</include>
+                                    </includes>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.thingsboard</groupId>
@@ -149,176 +181,6 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
             </plugin>
-<!--            <plugin>-->
-<!--                <groupId>org.apache.maven.plugins</groupId>-->
-<!--                <artifactId>maven-resources-plugin</artifactId>-->
-<!--                <executions>-->
-<!--                    <execution>-->
-<!--                        <id>copy-linux-conf</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${pkg.linux.dist}/conf</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>config</directory>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                            <filters>-->
-<!--                                <filter>src/main/filters/unix.properties</filter>-->
-<!--                            </filters>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                    <execution>-->
-<!--                        <id>copy-linux-init</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${pkg.linux.dist}/init</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>src/main/scripts/init</directory>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                            <filters>-->
-<!--                                <filter>src/main/filters/unix.properties</filter>-->
-<!--                            </filters>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                    <execution>-->
-<!--                        <id>copy-win-conf</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${pkg.win.dist}/conf</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>config</directory>-->
-<!--                                    <excludes>-->
-<!--                                        <exclude>tb-web-ui.conf</exclude>-->
-<!--                                    </excludes>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                            <filters>-->
-<!--                                <filter>src/main/filters/windows.properties</filter>-->
-<!--                            </filters>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                    <execution>-->
-<!--                        <id>copy-control</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${project.build.directory}/control</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>src/main/scripts/control</directory>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                            <filters>-->
-<!--                                <filter>src/main/filters/unix.properties</filter>-->
-<!--                            </filters>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                    <execution>-->
-<!--                        <id>copy-windows-control</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${pkg.win.dist}</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>src/main/scripts/windows</directory>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                            <filters>-->
-<!--                                <filter>src/main/filters/windows.properties</filter>-->
-<!--                            </filters>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                    <execution>-->
-<!--                        <id>copy-docker-config</id>-->
-<!--                        <phase>process-resources</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>copy-resources</goal>-->
-<!--                        </goals>-->
-<!--                        <configuration>-->
-<!--                            <outputDirectory>${project.build.directory}</outputDirectory>-->
-<!--                            <resources>-->
-<!--                                <resource>-->
-<!--                                    <directory>docker</directory>-->
-<!--                                    <filtering>true</filtering>-->
-<!--                                </resource>-->
-<!--                            </resources>-->
-<!--                        </configuration>-->
-<!--                    </execution>-->
-<!--                </executions>-->
-<!--            </plugin>-->
-<!--            <plugin>-->
-<!--                <groupId>org.thingsboard</groupId>-->
-<!--                <artifactId>gradle-maven-plugin</artifactId>-->
-<!--                <configuration>-->
-<!--                    <gradleProjectDirectory>${basedir}</gradleProjectDirectory>-->
-<!--                    <tasks>-->
-<!--                        <task>build</task>-->
-<!--                        <task>buildDeb</task>-->
-<!--                        <task>buildRpm</task>-->
-<!--                        <task>renameDeb</task>-->
-<!--                        <task>renameRpm</task>-->
-<!--                    </tasks>-->
-<!--                    <args>-->
-<!--                        <arg>-PprojectBuildDir=${project.build.directory}</arg>-->
-<!--                        <arg>-PprojectVersion=${project.version}</arg>-->
-<!--                        <arg>-PpkgName=${pkg.name}</arg>-->
-<!--                        <arg>-PpkgUser=${pkg.user}</arg>-->
-<!--                        <arg>-PpkgInstallFolder=${pkg.installFolder}</arg>-->
-<!--                        <arg>-PpkgLogFolder=${pkg.unixLogFolder}</arg>-->
-<!--                    </args>-->
-<!--                </configuration>-->
-<!--                <executions>-->
-<!--                    <execution>-->
-<!--                        <phase>package</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>invoke</goal>-->
-<!--                        </goals>-->
-<!--                    </execution>-->
-<!--                </executions>-->
-<!--            </plugin>-->
-<!--            <plugin>-->
-<!--                <groupId>org.apache.maven.plugins</groupId>-->
-<!--                <artifactId>maven-assembly-plugin</artifactId>-->
-<!--                <version>3.0.0</version>-->
-<!--                <configuration>-->
-<!--                    <finalName>${pkg.name}</finalName>-->
-<!--                    <descriptors>-->
-<!--                        <descriptor>../../packaging/js/assembly/windows.xml</descriptor>-->
-<!--                    </descriptors>-->
-<!--                </configuration>-->
-<!--                <executions>-->
-<!--                    <execution>-->
-<!--                        <id>assembly</id>-->
-<!--                        <phase>package</phase>-->
-<!--                        <goals>-->
-<!--                            <goal>single</goal>-->
-<!--                        </goals>-->
-<!--                    </execution>-->
-<!--                </executions>-->
-<!--            </plugin>-->
             <plugin>
                 <groupId>com.spotify</groupId>
                 <artifactId>dockerfile-maven-plugin</artifactId>
@@ -355,10 +217,10 @@
     </build>
     <profiles>
         <profile>
-            <id>npm-start</id>
+            <id>yarn-start</id>
             <activation>
                 <property>
-                    <name>npm-start</name>
+                    <name>yarn-start</name>
                 </property>
             </activation>
             <build>
@@ -366,16 +228,15 @@
                     <plugin>
                         <groupId>com.github.eirslett</groupId>
                         <artifactId>frontend-maven-plugin</artifactId>
-                        <version>1.0</version>
                         <configuration>
                             <installDirectory>target</installDirectory>
                             <workingDirectory>${basedir}</workingDirectory>
                         </configuration>
                         <executions>
                             <execution>
-                                <id>npm start</id>
+                                <id>yarn start</id>
                                 <goals>
-                                    <goal>npm</goal>
+                                    <goal>yarn</goal>
                                 </goals>
 
                                 <configuration>

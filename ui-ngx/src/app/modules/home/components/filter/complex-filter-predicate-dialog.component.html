@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
     limitations under the License.
 
 -->
-<form [formGroup]="complexFilterFormGroup" (ngSubmit)="save()" style="width: 900px;">
+<form [formGroup]="complexFilterFormGroup" (ngSubmit)="save()" style="width: 1200px;">
   <mat-toolbar color="primary">
     <h2 translate>filter.complex-filter</h2>
-    <span fxFlex></span>
+    <span class="flex-1"></span>
     <button mat-icon-button
             (click)="cancel()"
             type="button">
@@ -26,7 +26,7 @@
     </button>
   </mat-toolbar>
   <div mat-dialog-content>
-    <fieldset [disabled]="isLoading$ | async" fxLayout="column">
+    <fieldset [disabled]="isLoading$ | async"  class="flex flex-col">
       <mat-form-field class="mat-block">
         <mat-label translate>filter.operation.operation</mat-label>
         <mat-select required formControlName="operation">
@@ -37,24 +37,28 @@
       </mat-form-field>
       <tb-filter-predicate-list
         [valueType]="data.valueType"
+        [displayUserParameters]="data.displayUserParameters"
+        [allowUserDynamicSource]="data.allowUserDynamicSource"
+        [onlyUserDynamicSource]="data.onlyUserDynamicSource"
         [operation]="complexFilterFormGroup.get('operation').value"
         [key]="data.key"
         formControlName="predicates">
       </tb-filter-predicate-list>
     </fieldset>
   </div>
-  <div mat-dialog-actions fxLayoutAlign="end center">
-    <button mat-raised-button color="primary"
-            type="submit"
-            [disabled]="(isLoading$ | async) || complexFilterFormGroup.invalid || !complexFilterFormGroup.dirty">
-      {{ (isAdd ? 'action.add' : 'action.update') | translate }}
-    </button>
+  <div mat-dialog-actions class="flex items-center justify-end">
     <button mat-button color="primary"
             type="button"
             [disabled]="(isLoading$ | async)"
             (click)="cancel()"
             cdkFocusInitial>
-      {{ 'action.cancel' | translate }}
+      {{ (data.readonly ? 'action.close' : 'action.cancel') | translate }}
+    </button>
+    <button mat-raised-button color="primary"
+            *ngIf="!data.readonly"
+            type="submit"
+            [disabled]="(isLoading$ | async) || complexFilterFormGroup.invalid || !complexFilterFormGroup.dirty">
+      {{ (isAdd ? 'action.add' : 'action.update') | translate }}
     </button>
   </div>
 </form>

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,14 +14,24 @@
 /// limitations under the License.
 ///
 
-import { Component, Input, OnDestroy, OnInit, ViewChild, ViewContainerRef } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component, HostBinding,
+  Injector,
+  Input,
+  OnDestroy,
+  OnInit,
+  StaticProvider,
+  ViewChild,
+  ViewContainerRef
+} from '@angular/core';
 import { TooltipPosition } from '@angular/material/tooltip';
 import { AliasInfo, IAliasController } from '@core/api/widget-api.models';
 import { CdkOverlayOrigin, ConnectedPosition, Overlay, OverlayConfig, OverlayRef } from '@angular/cdk/overlay';
 import { TranslateService } from '@ngx-translate/core';
 import { Subscription } from 'rxjs';
 import { BreakpointObserver } from '@angular/cdk/layout';
-import { ComponentPortal, PortalInjector } from '@angular/cdk/portal';
+import { ComponentPortal } from '@angular/cdk/portal';
 import {
   ALIASES_ENTITY_SELECT_PANEL_DATA,
   AliasesEntitySelectPanelComponent,
@@ -36,6 +46,9 @@ import { AliasFilterType } from '@shared/models/alias.models';
   styleUrls: ['./aliases-entity-select.component.scss']
 })
 export class AliasesEntitySelectComponent implements OnInit, OnDestroy {
+
+  @HostBinding('class')
+  aliasesEntitySelectClass = 'tb-hide';
 
   aliasControllerValue: IAliasController;
 
@@ -64,6 +77,7 @@ export class AliasesEntitySelectComponent implements OnInit, OnDestroy {
 
   constructor(private translate: TranslateService,
               private overlay: Overlay,
+              private cd: ChangeDetectorRef,
               private breakpointObserver: BreakpointObserver,
               private viewContainerRef: ViewContainerRef) {
   }
@@ -136,12 +150,12 @@ export class AliasesEntitySelectComponent implements OnInit, OnDestroy {
     overlayRef.attach(new ComponentPortal(AliasesEntitySelectPanelComponent, this.viewContainerRef, injector));
   }
 
-  private _createAliasesEntitySelectPanelInjector(overlayRef: OverlayRef, data: AliasesEntitySelectPanelData): PortalInjector {
-    const injectionTokens = new WeakMap<any, any>([
-      [ALIASES_ENTITY_SELECT_PANEL_DATA, data],
-      [OverlayRef, overlayRef]
-    ]);
-    return new PortalInjector(this.viewContainerRef.injector, injectionTokens);
+  private _createAliasesEntitySelectPanelInjector(overlayRef: OverlayRef, data: AliasesEntitySelectPanelData): Injector {
+    const providers: StaticProvider[] = [
+      {provide: ALIASES_ENTITY_SELECT_PANEL_DATA, useValue: data},
+      {provide: OverlayRef, useValue: overlayRef}
+    ];
+    return Injector.create({parent: this.viewContainerRef.injector, providers});
   }
 
   private updateDisplayValue() {
@@ -170,18 +184,21 @@ export class AliasesEntitySelectComponent implements OnInit, OnDestroy {
       displayValue = this.translate.instant('entity.entities');
     }
     this.displayValue = displayValue;
+    this.cd.detectChanges();
   }
 
   private updateEntityAliasesInfo() {
     const allEntityAliases = this.aliasController.getEntityAliases();
     this.entityAliasesInfo = {};
     this.hasSelectableAliasEntities = false;
+    this.aliasesEntitySelectClass = 'tb-hide';
     for (const aliasId of Object.keys(allEntityAliases)) {
       const aliasInfo = this.aliasController.getInstantAliasInfo(aliasId);
       if (aliasInfo && !aliasInfo.resolveMultiple && aliasInfo.currentEntity
         && aliasInfo.entityFilter && aliasInfo.entityFilter.type !== AliasFilterType.singleEntity) {
         this.entityAliasesInfo[aliasId] = deepClone(aliasInfo);
         this.hasSelectableAliasEntities = true;
+        this.aliasesEntitySelectClass = '';
       }
     }
   }

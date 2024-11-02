@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -16,22 +16,21 @@
 
 import { Component, OnInit } from '@angular/core';
 import { UserService } from '@core/http/user.service';
-import { User } from '@shared/models/user.model';
+import { AuthUser, User } from '@shared/models/user.model';
 import { Authority } from '@shared/models/authority.enum';
 import { PageComponent } from '@shared/components/page.component';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { UntypedFormBuilder, UntypedFormGroup, Validators } from '@angular/forms';
 import { HasConfirmForm } from '@core/guards/confirm-on-exit.guard';
 import { ActionAuthUpdateUserDetails } from '@core/auth/auth.actions';
 import { environment as env } from '@env/environment';
 import { TranslateService } from '@ngx-translate/core';
 import { ActionSettingsChangeLanguage } from '@core/settings/settings.actions';
-import { ChangePasswordDialogComponent } from '@modules/home/pages/profile/change-password-dialog.component';
-import { MatDialog } from '@angular/material/dialog';
-import { DialogService } from '@core/services/dialog.service';
-import { AuthService } from '@core/auth/auth.service';
 import { ActivatedRoute } from '@angular/router';
+import { isDefinedAndNotNull } from '@core/utils';
+import { getCurrentAuthUser } from '@core/auth/auth.selectors';
+import { AuthService } from '@core/auth/auth.service';
 
 @Component({
   selector: 'tb-profile',
@@ -41,19 +40,19 @@ import { ActivatedRoute } from '@angular/router';
 export class ProfileComponent extends PageComponent implements OnInit, HasConfirmForm {
 
   authorities = Authority;
-  profile: FormGroup;
+  profile: UntypedFormGroup;
   user: User;
   languageList = env.supportedLangs;
+  private readonly authUser: AuthUser;
 
   constructor(protected store: Store<AppState>,
               private route: ActivatedRoute,
               private userService: UserService,
               private authService: AuthService,
               private translate: TranslateService,
-              public dialog: MatDialog,
-              public dialogService: DialogService,
-              public fb: FormBuilder) {
+              public fb: UntypedFormBuilder) {
     super(store);
+    this.authUser = getCurrentAuthUser(this.store);
   }
 
   ngOnInit() {
@@ -61,12 +60,15 @@ export class ProfileComponent extends PageComponent implements OnInit, HasConfir
     this.userLoaded(this.route.snapshot.data.user);
   }
 
-  buildProfileForm() {
+  private buildProfileForm() {
     this.profile = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       firstName: [''],
       lastName: [''],
-      language: ['']
+      phone: [''],
+      language: [''],
+      homeDashboardId: [null],
+      homeDashboardHideToolbar: [true]
     });
   }
 
@@ -76,6 +78,8 @@ export class ProfileComponent extends PageComponent implements OnInit, HasConfir
       this.user.additionalInfo = {};
     }
     this.user.additionalInfo.lang = this.profile.get('language').value;
+    this.user.additionalInfo.homeDashboardId = this.profile.get('homeDashboardId').value;
+    this.user.additionalInfo.homeDashboardHideToolbar = this.profile.get('homeDashboardHideToolbar').value;
     this.userService.saveUser(this.user).subscribe(
       (user) => {
         this.userLoaded(user);
@@ -86,36 +90,45 @@ export class ProfileComponent extends PageComponent implements OnInit, HasConfir
             tenantId: user.tenantId,
             customerId: user.customerId,
             email: user.email,
+            phone: user.phone,
             firstName: user.firstName,
             id: user.id,
             lastName: user.lastName,
           } }));
         this.store.dispatch(new ActionSettingsChangeLanguage({ userLang: user.additionalInfo.lang }));
+        this.authService.refreshJwtToken(false);
       }
     );
   }
 
-  changePassword(): void {
-    this.dialog.open(ChangePasswordDialogComponent, {
-      disableClose: true,
-      panelClass: ['tb-dialog', 'tb-fullscreen-dialog']
-    });
-  }
-
-  userLoaded(user: User) {
+  private userLoaded(user: User) {
     this.user = user;
     this.profile.reset(user);
     let lang;
-    if (user.additionalInfo && user.additionalInfo.lang) {
-      lang = user.additionalInfo.lang;
-    } else {
+    let homeDashboardId;
+    let homeDashboardHideToolbar = true;
+    if (user.additionalInfo) {
+      if (user.additionalInfo.lang) {
+        lang = user.additionalInfo.lang;
+      }
+      homeDashboardId = user.additionalInfo.homeDashboardId;
+      if (isDefinedAndNotNull(user.additionalInfo.homeDashboardHideToolbar)) {
+        homeDashboardHideToolbar = user.additionalInfo.homeDashboardHideToolbar;
+      }
+    }
+    if (!lang) {
       lang = this.translate.currentLang;
     }
     this.profile.get('language').setValue(lang);
+    this.profile.get('homeDashboardId').setValue(homeDashboardId);
+    this.profile.get('homeDashboardHideToolbar').setValue(homeDashboardHideToolbar);
   }
 
-  confirmForm(): FormGroup {
+  confirmForm(): UntypedFormGroup {
     return this.profile;
   }
 
+  isSysAdmin(): boolean {
+    return this.authUser.authority === Authority.SYS_ADMIN;
+  }
 }

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,31 +15,32 @@
 ///
 
 import { MatDialogRef } from '@angular/material/dialog';
-import { Inject, InjectionToken } from '@angular/core';
-import { Store } from '@ngrx/store';
-import { AppState } from '@core/core.state';
+import { Directive, inject, InjectionToken } from '@angular/core';
 import { Router } from '@angular/router';
 import { PageComponent } from '@shared/components/page.component';
 import { CustomDialogContainerComponent } from './custom-dialog-container.component';
-import { FormBuilder, Validators } from '@angular/forms';
+import { UntypedFormBuilder, Validators } from '@angular/forms';
 
-export const CUSTOM_DIALOG_DATA = new InjectionToken<any>('ConfigDialogData');
+export const CUSTOM_DIALOG_DATA = new InjectionToken<CustomDialogData>('ConfigDialogData');
 
 export interface CustomDialogData {
   controller: (instance: CustomDialogComponent) => void;
   [key: string]: any;
 }
 
+@Directive()
+// eslint-disable-next-line @angular-eslint/directive-class-suffix
 export class CustomDialogComponent extends PageComponent {
 
   [key: string]: any;
 
-  constructor(protected store: Store<AppState>,
-              protected router: Router,
-              public dialogRef: MatDialogRef<CustomDialogContainerComponent>,
-              public fb: FormBuilder,
-              @Inject(CUSTOM_DIALOG_DATA) public data: CustomDialogData) {
-    super(store);
+  protected router = inject(Router);
+  public dialogRef = inject(MatDialogRef<CustomDialogContainerComponent>);
+  public data = inject(CUSTOM_DIALOG_DATA);
+  public fb = inject(UntypedFormBuilder);
+
+  constructor() {
+    super();
     // @ts-ignore
     this.validators = Validators;
     this.data.controller(this);

@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,33 @@
  */
 package org.thingsboard.server.common.data.entityview;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import org.thingsboard.server.common.data.EntityType;
 import org.thingsboard.server.common.data.relation.EntityRelation;
 import org.thingsboard.server.common.data.relation.EntityRelationsQuery;
-import org.thingsboard.server.common.data.relation.EntityTypeFilter;
+import org.thingsboard.server.common.data.relation.RelationEntityTypeFilter;
 import org.thingsboard.server.common.data.relation.RelationsSearchParameters;
 
 import java.util.Collections;
 import java.util.List;
 
+@Schema
 @Data
 public class EntityViewSearchQuery {
 
+    @Schema(description = "Main search parameters.")
     private RelationsSearchParameters parameters;
+    @Schema(description = "Type of the relation between root entity and device (e.g. 'Contains' or 'Manages').")
     private String relationType;
+    @Schema(description = "Array of entity view types to filter the related entities (e.g. 'Temperature Sensor', 'Smoke Sensor').")
     private List<String> entityViewTypes;
 
     public EntityRelationsQuery toEntitySearchQuery() {
         EntityRelationsQuery query = new EntityRelationsQuery();
         query.setParameters(parameters);
         query.setFilters(
-                Collections.singletonList(new EntityTypeFilter(relationType == null ? EntityRelation.CONTAINS_TYPE : relationType,
+                Collections.singletonList(new RelationEntityTypeFilter(relationType == null ? EntityRelation.CONTAINS_TYPE : relationType,
                         Collections.singletonList(EntityType.ENTITY_VIEW))));
         return query;
     }

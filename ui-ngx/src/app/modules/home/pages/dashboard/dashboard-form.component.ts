@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 /// limitations under the License.
 ///
 
-import { Component, Inject } from '@angular/core';
+import { ChangeDetectorRef, Component, Inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { EntityComponent } from '../../components/entity/entity.component';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { UntypedFormBuilder, UntypedFormGroup, Validators } from '@angular/forms';
 import { ActionNotificationShow } from '@core/notification/notification.actions';
 import { TranslateService } from '@ngx-translate/core';
 import {
@@ -30,6 +30,7 @@ import {
 import { DashboardService } from '@core/http/dashboard.service';
 import { EntityTableConfig } from '@home/models/entity/entities-table-config.models';
 import { isEqual } from '@core/utils';
+import { EntityType } from '@shared/models/entity-type.models';
 
 @Component({
   selector: 'tb-dashboard-form',
@@ -38,19 +39,21 @@ import { isEqual } from '@core/utils';
 })
 export class DashboardFormComponent extends EntityComponent<Dashboard> {
 
-  dashboardScope: 'tenant' | 'customer' | 'customer_user';
+  dashboardScope: 'tenant' | 'customer' | 'customer_user' | 'edge';
   customerId: string;
 
   publicLink: string;
   assignedCustomersText: string;
+  entityType = EntityType;
 
   constructor(protected store: Store<AppState>,
               protected translate: TranslateService,
               private dashboardService: DashboardService,
               @Inject('entity') protected entityValue: Dashboard,
               @Inject('entitiesTableConfig') protected entitiesTableConfigValue: EntityTableConfig<Dashboard>,
-              public fb: FormBuilder) {
-    super(store, fb, entityValue, entitiesTableConfigValue);
+              public fb: UntypedFormBuilder,
+              protected cd: ChangeDetectorRef) {
+    super(store, fb, entityValue, entitiesTableConfigValue, cd);
   }
 
   ngOnInit() {
@@ -75,11 +78,14 @@ export class DashboardFormComponent extends EntityComponent<Dashboard> {
     }
   }
 
-  buildForm(entity: Dashboard): FormGroup {
+  buildForm(entity: Dashboard): UntypedFormGroup {
     this.updateFields(entity);
-    return this.fb.group(
+    const form = this.fb.group(
       {
-        title: [entity ? entity.title : '', [Validators.required]],
+        title: [entity ? entity.title : '', [Validators.required, Validators.maxLength(255)]],
+        image: [entity ? entity.image : null],
+        mobileHide: [entity ? entity.mobileHide : false],
+        mobileOrder: [entity ? entity.mobileOrder : null, [Validators.pattern(/^-?[0-9]+$/)]],
         configuration: this.fb.group(
           {
             description: [entity && entity.configuration ? entity.configuration.description : ''],
@@ -87,23 +93,43 @@ export class DashboardFormComponent extends EntityComponent<Dashboard> {
         )
       }
     );
+    if (this.isAdd) {
+      form.addControl('assignedCustomerIds', this.fb.control([]));
+    }
+
+    return form;
   }
 
   updateForm(entity: Dashboard) {
     this.updateFields(entity);
     this.entityForm.patchValue({title: entity.title});
+    this.entityForm.patchValue({image: entity.image});
+    this.entityForm.patchValue({mobileHide: entity.mobileHide});
+    this.entityForm.patchValue({mobileOrder: entity.mobileOrder});
     this.entityForm.patchValue({configuration: {description: entity.configuration ? entity.configuration.description : ''}});
   }
 
   prepareFormValue(formValue: any): any {
-    formValue.configuration = {...(this.entity.configuration || {}), ...(formValue.configuration || {})};
-    return formValue;
+    const preparedValue = super.prepareFormValue(formValue);
+    preparedValue.configuration = {...(this.entity.configuration || {}), ...(preparedValue.configuration || {})};
+    return preparedValue;
   }
 
   onPublicLinkCopied($event) {
     this.store.dispatch(new ActionNotificationShow(
      {
         message: this.translate.instant('dashboard.public-link-copied-message'),
+        type: 'success',
+        duration: 750,
+        verticalPosition: 'bottom',
+        horizontalPosition: 'right'
+      }));
+  }
+
+  onDashboardIdCopied($event) {
+    this.store.dispatch(new ActionNotificationShow(
+      {
+        message: this.translate.instant('dashboard.idCopiedMessage'),
         type: 'success',
         duration: 750,
         verticalPosition: 'bottom',

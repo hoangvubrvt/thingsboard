@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.thingsboard</groupId>
-        <version>3.1.0-SNAPSHOT</version>
+        <version>3.9.0-SNAPSHOT</version>
         <artifactId>thingsboard</artifactId>
     </parent>
     <groupId>org.thingsboard</groupId>
@@ -45,7 +45,6 @@
             <plugin>
                 <groupId>com.github.eirslett</groupId>
                 <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.7.5</version>
                 <configuration>
                     <installDirectory>target</installDirectory>
                     <workingDirectory>${basedir}</workingDirectory>
@@ -54,20 +53,20 @@
                     <execution>
                         <id>install node and npm</id>
                         <goals>
-                            <goal>install-node-and-npm</goal>
+                            <goal>install-node-and-yarn</goal>
                         </goals>
                         <configuration>
-                            <nodeVersion>v12.16.1</nodeVersion>
-                            <npmVersion>6.13.4</npmVersion>
+                            <nodeVersion>v20.11.1</nodeVersion>
+                            <yarnVersion>v1.22.22</yarnVersion>
                         </configuration>
                     </execution>
                     <execution>
-                        <id>npm install</id>
+                        <id>yarn install</id>
                         <goals>
-                            <goal>npm</goal>
+                            <goal>yarn</goal>
                         </goals>
                         <configuration>
-                            <arguments>install</arguments>
+                            <arguments>install --non-interactive --network-concurrency 4 --network-timeout 100000 --mutex network</arguments>
                         </configuration>
                     </execution>
                 </executions>
@@ -76,7 +75,7 @@
     </build>
     <profiles>
         <profile>
-            <id>npm-build</id>
+            <id>yarn-build</id>
             <activation>
                 <activeByDefault>true</activeByDefault>
             </activation>
@@ -85,16 +84,15 @@
                     <plugin>
                         <groupId>com.github.eirslett</groupId>
                         <artifactId>frontend-maven-plugin</artifactId>
-                        <version>1.7.5</version>
                         <configuration>
                             <installDirectory>target</installDirectory>
                             <workingDirectory>${basedir}</workingDirectory>
                         </configuration>
                         <executions>
                             <execution>
-                                <id>npm build</id>
+                                <id>yarn build</id>
                                 <goals>
-                                    <goal>npm</goal>
+                                    <goal>yarn</goal>
                                 </goals>
                                 <configuration>
                                     <arguments>run build:prod</arguments>
@@ -106,10 +104,10 @@
             </build>
         </profile>
         <profile>
-            <id>npm-start</id>
+            <id>yarn-start</id>
             <activation>
                 <property>
-                    <name>npm-start</name>
+                    <name>yarn-start</name>
                 </property>
             </activation>
             <build>
@@ -117,16 +115,15 @@
                     <plugin>
                         <groupId>com.github.eirslett</groupId>
                         <artifactId>frontend-maven-plugin</artifactId>
-                        <version>1.7.5</version>
                         <configuration>
                             <installDirectory>target</installDirectory>
                             <workingDirectory>${basedir}</workingDirectory>
                         </configuration>
                         <executions>
                             <execution>
-                                <id>npm start</id>
+                                <id>yarn start</id>
                                 <goals>
-                                    <goal>npm</goal>
+                                    <goal>yarn</goal>
                                 </goals>
                                 <configuration>
                                     <arguments>start</arguments>

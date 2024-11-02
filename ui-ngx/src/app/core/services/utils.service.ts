@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,33 +14,47 @@
 /// limitations under the License.
 ///
 
-// tslint:disable-next-line:no-reference
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../../../../src/typings/rawloader.typings.d.ts" />
 
-import { Inject, Injectable, NgZone } from '@angular/core';
+import { Inject, Injectable, NgZone, Renderer2 } from '@angular/core';
 import { WINDOW } from '@core/services/window.service';
 import { ExceptionData } from '@app/shared/models/error.models';
 import {
+  base64toObj,
+  base64toString,
+  baseUrl,
   createLabelFromDatasource,
   deepClone,
   deleteNullProperties,
   guid,
+  hashCode,
   isDefined,
   isDefinedAndNotNull,
-  isUndefined
+  isString,
+  isUndefined,
+  objToBase64,
+  objToBase64URI
 } from '@core/utils';
 import { WindowMessage } from '@shared/models/window-message.model';
 import { TranslateService } from '@ngx-translate/core';
-import { customTranslationsPrefix } from '@app/shared/models/constants';
+import { customTranslationsPrefix, i18nPrefix } from '@app/shared/models/constants';
 import { DataKey, Datasource, DatasourceType, KeyInfo } from '@shared/models/widget.models';
-import { EntityType } from '@shared/models/entity-type.models';
-import { DataKeyType } from '@app/shared/models/telemetry/telemetry.models';
-import { alarmFields } from '@shared/models/alarm.models';
+import { DataKeyType, SharedTelemetrySubscriber } from '@app/shared/models/telemetry/telemetry.models';
+import { alarmFields, alarmSeverityTranslations, alarmStatusTranslations } from '@shared/models/alarm.models';
 import { materialColors } from '@app/shared/models/material.models';
 import { WidgetInfo } from '@home/models/widget-component.models';
 import jsonSchemaDefaults from 'json-schema-defaults';
-import materialIconsCodepoints from '!raw-loader!material-design-icons/iconfont/codepoints';
-import { Observable, of, ReplaySubject } from 'rxjs';
+import { Observable } from 'rxjs';
+import { publishReplay, refCount } from 'rxjs/operators';
+import { WidgetContext } from '@app/modules/home/models/widget-component.models';
+import { AttributeData, LatestTelemetry, TelemetryType } from '@shared/models/telemetry/telemetry.models';
+import { EntityId } from '@shared/models/id/entity-id';
+import { DatePipe, DOCUMENT } from '@angular/common';
+import { entityTypeTranslations } from '@shared/models/entity-type.models';
+import cssjs from '@core/css/css';
+
+const i18nRegExp = new RegExp(`{${i18nPrefix}:[^{}]+}`, 'g');
 
 const predefinedFunctions: { [func: string]: string } = {
   Sin: 'return Math.round(1000*Math.sin(time/5000));',
@@ -68,13 +82,6 @@ const defaultAlarmFields: Array<string> = [
   alarmFields.severity.keyName,
   alarmFields.status.keyName
 ];
-
-const commonMaterialIcons: Array<string> = ['more_horiz', 'more_vert', 'open_in_new',
-  'visibility', 'play_arrow', 'arrow_back', 'arrow_downward',
-  'arrow_forward', 'arrow_upwards', 'close', 'refresh', 'menu', 'show_chart', 'multiline_chart', 'pie_chart', 'insert_chart', 'people',
-  'person', 'domain', 'devices_other', 'now_widgets', 'dashboards', 'map', 'pin_drop', 'my_location', 'extension', 'search',
-  'settings', 'notifications', 'notifications_active', 'info', 'info_outline', 'warning', 'list', 'file_download', 'import_export',
-  'share', 'add', 'edit', 'done'];
 
 // @dynamic
 @Injectable({
@@ -104,11 +111,11 @@ export class UtilsService {
 
   defaultAlarmDataKeys: Array<DataKey> = [];
 
-  materialIcons: Array<string> = [];
-
   constructor(@Inject(WINDOW) private window: Window,
-    private zone: NgZone,
-    private translate: TranslateService) {
+              @Inject(DOCUMENT) private document: Document,
+              private zone: NgZone,
+              private datePipe: DatePipe,
+              private translate: TranslateService) {
     let frame: Element = null;
     try {
       frame = window.frameElement;
@@ -163,6 +170,27 @@ export class UtilsService {
     return deepClone(this.defaultAlarmDataKeys);
   }
 
+  public defaultAlarmFieldContent(key: DataKey | {name: string}, value: any): string {
+    if (isDefined(value)) {
+      const alarmField = alarmFields[key.name];
+      if (alarmField) {
+        if (alarmField.time) {
+          return value ? this.datePipe.transform(value, 'yyyy-MM-dd HH:mm:ss') : '';
+        } else if (alarmField === alarmFields.severity) {
+          return this.translate.instant(alarmSeverityTranslations.get(value));
+        } else if (alarmField === alarmFields.status) {
+          return alarmStatusTranslations.get(value) ? this.translate.instant(alarmStatusTranslations.get(value)) : value;
+        } else if (alarmField === alarmFields.originatorType) {
+          return this.translate.instant(entityTypeTranslations.get(value).type);
+        } else if (alarmField.value === alarmFields.assignee.value) {
+          return '';
+        }
+      }
+      return value;
+    }
+    return '';
+  }
+
   public generateObjectFromJsonSchema(schema: any): any {
     const obj = jsonSchemaDefaults(schema);
     deleteNullProperties(obj);
@@ -171,6 +199,10 @@ export class UtilsService {
 
   public processWidgetException(exception: any): ExceptionData {
     const data = this.parseException(exception, -6);
+    if (data.message?.startsWith('NG0')) {
+       data.message = `${this.translate.instant('widget.widget-template-error')}<br/>
+                       <br/><i>${this.translate.instant('dialog.error-message-title')}</i><br/><br/>${data.message}`;
+    }
     if (this.widgetEditMode) {
       const message: WindowMessage = {
         type: 'widgetException',
@@ -221,8 +253,31 @@ export class UtilsService {
   }
 
   public customTranslation(translationValue: string, defaultValue: string): string {
+    if (translationValue && isString(translationValue)) {
+      if (translationValue.includes(`{${i18nPrefix}`)) {
+        const matches = translationValue.match(i18nRegExp);
+        let result = translationValue;
+        for (const match of matches) {
+          const translationId = match.substring(6, match.length - 1);
+          result = result.replace(match, this.doTranslate(translationId, match));
+        }
+        return result;
+      } else {
+        return this.doTranslate(translationValue, defaultValue, customTranslationsPrefix);
+      }
+    } else {
+      return translationValue;
+    }
+  }
+
+  private doTranslate(translationValue: string, defaultValue: string, prefix?: string): string {
     let result: string;
-    const translationId = customTranslationsPrefix + translationValue;
+    let translationId;
+    if (prefix) {
+      translationId = prefix + translationValue;
+    } else {
+      translationId = translationValue;
+    }
     const translation = this.translate.instant(translationId);
     if (translation !== translationId) {
       result = translation + '';
@@ -234,56 +289,6 @@ export class UtilsService {
 
   public guid(): string {
     return guid();
-  }
-
-  public validateDatasources(datasources: Array<Datasource>): Array<Datasource> {
-    datasources.forEach((datasource) => {
-      // @ts-ignore
-      if (datasource.type === 'device') {
-        datasource.type = DatasourceType.entity;
-        datasource.entityType = EntityType.DEVICE;
-        if (datasource.deviceId) {
-          datasource.entityId = datasource.deviceId;
-        } else if (datasource.deviceAliasId) {
-          datasource.entityAliasId = datasource.deviceAliasId;
-        }
-        if (datasource.deviceName) {
-          datasource.entityName = datasource.deviceName;
-        }
-      }
-      if (datasource.type === DatasourceType.entity && datasource.entityId) {
-        datasource.name = datasource.entityName;
-      }
-      if (!datasource.dataKeys) {
-        datasource.dataKeys = [];
-      }
-    });
-    return datasources;
-  }
-
-  public getMaterialIcons(): Observable<Array<string>> {
-    if (this.materialIcons.length) {
-      return of(this.materialIcons);
-    } else {
-      const materialIconsSubject = new ReplaySubject<Array<string>>();
-      this.zone.runOutsideAngular(() => {
-        const codepointsArray = materialIconsCodepoints
-          .split('\n')
-          .filter((codepoint) => codepoint && codepoint.length);
-        codepointsArray.forEach((codepoint) => {
-          const values = codepoint.split(' ');
-          if (values && values.length === 2) {
-            this.materialIcons.push(values[0]);
-          }
-        });
-        materialIconsSubject.next(this.materialIcons);
-      });
-      return materialIconsSubject.asObservable();
-    }
-  }
-
-  public getCommonMaterialIcons(): Array<string> {
-    return commonMaterialIcons;
   }
 
   public getMaterialColor(index: number) {
@@ -364,13 +369,19 @@ export class UtilsService {
     });
   }
 
+  public stringToHslColor(str: string, saturationPercentage: number, lightnessPercentage: number): string {
+    if (str && str.length) {
+      const hue = hashCode(str) % 360;
+      return `hsl(${hue}, ${saturationPercentage}%, ${lightnessPercentage}%)`;
+    }
+  }
+
   public currentPerfTime(): number {
     return this.window.performance && this.window.performance.now ?
       this.window.performance.now() : Date.now();
   }
 
-  public getQueryParam(name: string): string {
-    const url = this.window.location.href;
+  public getQueryParam(name: string, url = this.window.location.href): string {
     name = name.replace(/[\[\]]/g, '\\$&');
     const regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
     const results = regex.exec(url);
@@ -383,9 +394,23 @@ export class UtilsService {
     return decodeURIComponent(results[2].replace(/\+/g, ' '));
   }
 
+  public removeQueryParams(keys: Array<string>) {
+    let params = this.window.location.search;
+    for (const key of keys) {
+      params = this.updateUrlQueryString(params, key, null);
+    }
+    const baseUrlPart = [baseUrl(), this.window.location.pathname].join('');
+    this.window.history.replaceState({}, '', baseUrlPart + params);
+  }
+
   public updateQueryParam(name: string, value: string | null) {
-    const baseUrl = [this.window.location.protocol, '//', this.window.location.host, this.window.location.pathname].join('');
+    const baseUrlPart = [baseUrl(), this.window.location.pathname].join('');
     const urlQueryString = this.window.location.search;
+    const params = this.updateUrlQueryString(urlQueryString, name, value);
+    this.window.history.replaceState({}, '', baseUrlPart + params);
+  }
+
+  private updateUrlQueryString(urlQueryString: string, name: string, value: string | null): string {
     let newParam = '';
     let params = '';
     if (value !== null) {
@@ -398,13 +423,20 @@ export class UtilsService {
           newParam = '$1' + newParam;
         }
         params = urlQueryString.replace(keyRegex, newParam);
+        if (params.startsWith('&')) {
+          params = '?' + params.substring(1);
+        }
       } else if (newParam) {
         params = urlQueryString + '&' + newParam;
       }
     } else if (newParam) {
       params = '?' + newParam;
     }
-    this.window.history.replaceState({}, '', baseUrl + params);
+    return params;
+  }
+
+  public baseUrl(): string {
+    return baseUrl();
   }
 
   public deepClone<T>(target: T, ignoreFields?: string[]): T {
@@ -419,6 +451,10 @@ export class UtilsService {
     return isDefined(value);
   }
 
+  public isDefinedAndNotNull(value: any): boolean {
+    return isDefinedAndNotNull(value);
+  }
+
   public defaultValue(value: any, defaultValue: any): any {
     if (isDefinedAndNotNull(value)) {
       return value;
@@ -426,4 +462,64 @@ export class UtilsService {
       return defaultValue;
     }
   }
+
+  private getEntityIdFromDatasource(dataSource: Datasource): EntityId {
+    return {id: dataSource.entityId, entityType: dataSource.entityType};
+  }
+
+  public subscribeToEntityTelemetry(ctx: WidgetContext,
+                                    entityId?: EntityId,
+                                    type: TelemetryType = LatestTelemetry.LATEST_TELEMETRY,
+                                    keys: string[] = null): Observable<Array<AttributeData>> {
+    if (!entityId && ctx.datasources.length > 0) {
+      entityId = this.getEntityIdFromDatasource(ctx.datasources[0]);
+    }
+    const subscription = SharedTelemetrySubscriber.createEntityAttributesSubscription(ctx.telemetryWsService, entityId, type, ctx.ngZone, keys);
+    if (!ctx.telemetrySubscribers) {
+      ctx.telemetrySubscribers = [];
+    }
+    ctx.telemetrySubscribers.push(subscription);
+    subscription.subscribe();
+    return subscription.attributeData$.pipe(
+      publishReplay(1),
+      refCount()
+    );
+  }
+
+  public objToBase64(obj: any): string {
+    return objToBase64(obj);
+  }
+
+  public base64toString(b64Encoded: string): string {
+    return base64toString(b64Encoded);
+  }
+
+  public objToBase64URI(obj: any): string {
+    return objToBase64URI(obj);
+  }
+
+  public base64toObj(b64Encoded: string): any {
+    return base64toObj(b64Encoded);
+  }
+
+  public applyCssToElement(renderer: Renderer2, element: any, cssClassPrefix: string, css: string): string {
+    const cssParser = new cssjs();
+    cssParser.testMode = false;
+    const cssClass = `${cssClassPrefix}-${guid()}`;
+    cssParser.cssPreviewNamespace = cssClass;
+    cssParser.createStyleElement(cssClass, css);
+    renderer.addClass(element, cssClass);
+    return cssClass;
+  }
+
+  public clearCssElement(renderer: Renderer2, cssClass: string, element?: any): void {
+    if (element) {
+      renderer.removeClass(element, cssClass);
+    }
+    const el = this.document.getElementById(cssClass);
+    if (el) {
+      el.parentNode.removeChild(el);
+    }
+  }
+
 }

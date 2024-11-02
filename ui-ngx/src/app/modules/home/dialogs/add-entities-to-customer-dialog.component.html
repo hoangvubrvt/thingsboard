@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 <form [formGroup]="addEntitiesToCustomerFormGroup" (ngSubmit)="assign()">
   <mat-toolbar color="primary">
     <h2>{{ assignToCustomerTitle | translate }}</h2>
-    <span fxFlex></span>
-    <button mat-button mat-icon-button
+    <span class="flex-1"></span>
+    <button mat-icon-button
             (click)="cancel()"
             type="button">
       <mat-icon class="material-icons">close</mat-icon>
@@ -39,18 +39,18 @@
       </tb-entity-list>
     </fieldset>
   </div>
-  <div mat-dialog-actions fxLayoutAlign="end center">
-    <button mat-raised-button color="primary"
-            type="submit"
-            [disabled]="(isLoading$ | async) || addEntitiesToCustomerFormGroup.invalid
-            || !addEntitiesToCustomerFormGroup.dirty">
-      {{ 'action.assign' | translate }}
-    </button>
+  <div mat-dialog-actions class="flex items-center justify-end">
     <button mat-button color="primary"
             type="button"
             [disabled]="(isLoading$ | async)"
             (click)="cancel()" cdkFocusInitial>
       {{ 'action.cancel' | translate }}
+    </button>
+    <button mat-raised-button color="primary"
+            type="submit"
+            [disabled]="(isLoading$ | async) || addEntitiesToCustomerFormGroup.invalid
+            || !addEntitiesToCustomerFormGroup.dirty">
+      {{ 'action.assign' | translate }}
     </button>
   </div>
 </form>

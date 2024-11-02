@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,27 +20,30 @@ import org.thingsboard.rule.engine.api.NodeConfiguration;
 import org.thingsboard.rule.engine.data.RelationsQuery;
 import org.thingsboard.server.common.data.relation.EntityRelation;
 import org.thingsboard.server.common.data.relation.EntitySearchDirection;
-import org.thingsboard.server.common.data.relation.EntityTypeFilter;
+import org.thingsboard.server.common.data.relation.RelationEntityTypeFilter;
 
 import java.util.Collections;
 
+import static org.thingsboard.rule.engine.transform.OriginatorSource.CUSTOMER;
+
 @Data
-public class TbChangeOriginatorNodeConfiguration extends TbTransformNodeConfiguration implements NodeConfiguration {
+public class TbChangeOriginatorNodeConfiguration implements NodeConfiguration<TbChangeOriginatorNodeConfiguration> {
 
-    private String originatorSource;
-
+    private OriginatorSource originatorSource;
     private RelationsQuery relationsQuery;
+    private String entityType;
+    private String entityNamePattern;
 
     @Override
     public TbChangeOriginatorNodeConfiguration defaultConfiguration() {
         TbChangeOriginatorNodeConfiguration configuration = new TbChangeOriginatorNodeConfiguration();
-        configuration.setOriginatorSource(TbChangeOriginatorNode.CUSTOMER_SOURCE);
+        configuration.setOriginatorSource(CUSTOMER);
 
         RelationsQuery relationsQuery = new RelationsQuery();
         relationsQuery.setDirection(EntitySearchDirection.FROM);
         relationsQuery.setMaxLevel(1);
-        EntityTypeFilter entityTypeFilter = new EntityTypeFilter(EntityRelation.CONTAINS_TYPE, Collections.emptyList());
-        relationsQuery.setFilters(Collections.singletonList(entityTypeFilter));
+        RelationEntityTypeFilter relationEntityTypeFilter = new RelationEntityTypeFilter(EntityRelation.CONTAINS_TYPE, Collections.emptyList());
+        relationsQuery.setFilters(Collections.singletonList(relationEntityTypeFilter));
         configuration.setRelationsQuery(relationsQuery);
 
         return configuration;

@@ -1,5 +1,5 @@
 /*
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,25 +15,30 @@
  */
 import * as React from 'react';
 import { JsonFormFieldProps, JsonFormFieldState } from '@shared/components/json-form/react/json-form.models';
-import FormControlLabel from '@material-ui/core/FormControlLabel';
-import { FormLabel, Radio, RadioGroup } from '@material-ui/core';
-import FormControl from '@material-ui/core/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import { FormLabel, Radio, RadioGroup } from '@mui/material';
+import FormControl from '@mui/material/FormControl';
 import ThingsboardBaseComponent from '@shared/components/json-form/react/json-form-base-component';
 
 class ThingsboardRadios extends React.Component<JsonFormFieldProps, JsonFormFieldState> {
   render() {
     const items = this.props.form.titleMap.map((item, index) => {
       return (
-          <FormControlLabel value={item.value} control={<Radio />} label={item.name} key={index} />
+          <FormControlLabel value={item.value} control={<Radio color={'secondary'} />} label={item.name} key={index} />
       );
     });
+
+    let row = false;
+    if (this.props.form.direction === 'row') {
+      row = true;
+    }
 
     return (
       <FormControl component='fieldset'
                    className={this.props.form.htmlClass}
                    disabled={this.props.form.readonly}>
         <FormLabel component='legend'>{this.props.form.title}</FormLabel>
-        <RadioGroup name={this.props.form.title} value={this.props.value} onChange={(e) => {
+        <RadioGroup row={row} name={this.props.form.title} value={this.props.value} onChange={(e) => {
           this.props.onChangeValidate(e);
         }}>
           {items}

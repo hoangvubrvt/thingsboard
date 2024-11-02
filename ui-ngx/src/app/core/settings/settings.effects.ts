@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 import { ActivationEnd, Router } from '@angular/router';
 import { Injectable } from '@angular/core';
 import { select, Store } from '@ngrx/store';
-import { Actions, Effect, ofType } from '@ngrx/effects';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { TranslateService } from '@ngx-translate/core';
 import { merge } from 'rxjs';
 import { distinctUntilChanged, filter, map, tap, withLatestFrom } from 'rxjs/operators';
@@ -28,7 +28,6 @@ import { AppState } from '@app/core/core.state';
 import { LocalStorageService } from '@app/core/local-storage/local-storage.service';
 import { TitleService } from '@app/core/services/title.service';
 import { updateUserLang } from '@app/core/settings/settings.utils';
-import { AuthService } from '@core/auth/auth.service';
 import { UtilsService } from '@core/services/utils.service';
 import { getCurrentAuthUser } from '@core/auth/auth.selectors';
 import { ActionAuthUpdateLastPublicDashboardId } from '../auth/auth.actions';
@@ -40,7 +39,6 @@ export class SettingsEffects {
   constructor(
     private actions$: Actions<SettingsActions>,
     private store: Store<AppState>,
-    private authService: AuthService,
     private utils: UtilsService,
     private router: Router,
     private localStorageService: LocalStorageService,
@@ -49,27 +47,20 @@ export class SettingsEffects {
   ) {
   }
 
-  @Effect({dispatch: false})
-  persistSettings = this.actions$.pipe(
+  setTranslateServiceLanguage = createEffect(() => this.actions$.pipe(
     ofType(
       SettingsActionTypes.CHANGE_LANGUAGE,
     ),
     withLatestFrom(this.store.pipe(select(selectSettingsState))),
-    tap(([action, settings]) =>
-      this.localStorageService.setItem(SETTINGS_KEY, settings)
-    )
-  );
+    map(settings => settings[1]),
+    distinctUntilChanged((a, b) => a?.userLang === b?.userLang),
+    tap(setting => {
+      this.localStorageService.setItem(SETTINGS_KEY, setting);
+      updateUserLang(this.translate, setting.userLang);
+    })
+  ), {dispatch: false});
 
-  @Effect({dispatch: false})
-  setTranslateServiceLanguage = this.store.pipe(
-    select(selectSettingsState),
-    map(settings => settings.userLang),
-    distinctUntilChanged(),
-    tap(userLang => updateUserLang(this.translate, userLang))
-  );
-
-  @Effect({dispatch: false})
-  setTitle = merge(
+  setTitle = createEffect(() => merge(
     this.actions$.pipe(ofType(SettingsActionTypes.CHANGE_LANGUAGE)),
     this.router.events.pipe(filter(event => event instanceof ActivationEnd))
   ).pipe(
@@ -79,10 +70,9 @@ export class SettingsEffects {
         this.translate
       );
     })
-  );
+  ), {dispatch: false});
 
-  @Effect({dispatch: false})
-  setPublicId = merge(
+  setPublicId = createEffect(() => merge(
     this.router.events.pipe(filter(event => event instanceof ActivationEnd))
   ).pipe(
     tap((event) => {
@@ -95,5 +85,5 @@ export class SettingsEffects {
           { lastPublicDashboardId: snapshot.params.dashboardId}));
       }
     })
-  );
+  ), {dispatch: false});
 }

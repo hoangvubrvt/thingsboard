@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,7 +14,17 @@
 /// limitations under the License.
 ///
 
-import { AfterViewInit, Component, ElementRef, forwardRef, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  forwardRef,
+  Input, NgZone,
+  OnDestroy,
+  OnInit,
+  ViewChild
+} from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { TranslateService } from '@ngx-translate/core';
 import { PageComponent } from '@shared/components/page.component';
@@ -27,7 +37,7 @@ import { Direction, SortOrder } from '@shared/models/page/sort-order';
 import { MatPaginator } from '@angular/material/paginator';
 import { MatSort } from '@angular/material/sort';
 import { fromEvent, merge } from 'rxjs';
-import { debounceTime, distinctUntilChanged, tap } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, first, tap } from 'rxjs/operators';
 import {
   toWidgetActionDescriptor,
   WidgetActionCallbacks,
@@ -36,12 +46,14 @@ import {
   WidgetActionsDatasource
 } from '@home/components/widget/action/manage-widget-actions.component.models';
 import { UtilsService } from '@core/services/utils.service';
-import { WidgetActionDescriptor, WidgetActionSource } from '@shared/models/widget.models';
+import { WidgetActionDescriptor, WidgetActionSource, widgetType } from '@shared/models/widget.models';
 import {
   WidgetActionDialogComponent,
   WidgetActionDialogData
 } from '@home/components/widget/action/widget-action-dialog.component';
 import { deepClone } from '@core/utils';
+import { hidePageSizePixelValue } from '@shared/models/constants';
+import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 
 @Component({
   selector: 'tb-manage-widget-actions',
@@ -59,17 +71,26 @@ export class ManageWidgetActionsComponent extends PageComponent implements OnIni
 
   @Input() disabled: boolean;
 
+  @Input() widgetType: widgetType;
+
   @Input() callbacks: WidgetActionCallbacks;
+
+  @Input() actionSources: {[actionSourceId: string]: WidgetActionSource};
 
   innerValue: WidgetActionsData;
 
   displayedColumns: string[];
   pageLink: PageLink;
   textSearchMode = false;
+  hidePageSize = false;
   dataSource: WidgetActionsDatasource;
 
   viewsInited = false;
   dirtyValue = false;
+  dragDisabled = true;
+
+  private widgetResize$: ResizeObserver;
+  private destroyed = false;
 
   @ViewChild('searchInput') searchInputField: ElementRef;
 
@@ -82,18 +103,35 @@ export class ManageWidgetActionsComponent extends PageComponent implements OnIni
               private translate: TranslateService,
               private utils: UtilsService,
               private dialog: MatDialog,
-              private dialogs: DialogService) {
+              private dialogs: DialogService,
+              private cd: ChangeDetectorRef,
+              private elementRef: ElementRef,
+              private zone: NgZone) {
     super(store);
     const sortOrder: SortOrder = { property: 'actionSourceName', direction: Direction.ASC };
     this.pageLink = new PageLink(10, 0, null, sortOrder);
     this.dataSource = new WidgetActionsDatasource(this.translate, this.utils);
-    this.displayedColumns = ['actionSourceName', 'name', 'icon', 'typeName', 'actions'];
+    this.displayedColumns = ['actionSourceId', 'actionSourceName', 'name', 'icon', 'typeName', 'actions'];
   }
 
   ngOnInit(): void {
+    this.widgetResize$ = new ResizeObserver(() => {
+      this.zone.run(() => {
+        const showHidePageSize = this.elementRef.nativeElement.offsetWidth < hidePageSizePixelValue;
+        if (showHidePageSize !== this.hidePageSize) {
+          this.hidePageSize = showHidePageSize;
+          this.cd.markForCheck();
+        }
+      });
+    });
+    this.widgetResize$.observe(this.elementRef.nativeElement);
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
+    if (this.widgetResize$) {
+      this.widgetResize$.disconnect();
+    }
   }
 
   ngAfterViewInit() {
@@ -131,6 +169,23 @@ export class ManageWidgetActionsComponent extends PageComponent implements OnIni
     this.pageLink.sortOrder.property = this.sort.active;
     this.pageLink.sortOrder.direction = Direction[this.sort.direction.toUpperCase()];
     this.dataSource.loadActions(this.pageLink, reload);
+  }
+
+  dropAction(event: CdkDragDrop<WidgetActionsDatasource>) {
+    this.dragDisabled = true;
+    const droppedAction: WidgetActionDescriptorInfo = event.item.data;
+    this.dataSource.pageData$.pipe(
+      first()
+    ).subscribe((actions) => {
+      const action = actions.data;
+      let startActionSourceIndex = action.findIndex(element => element.actionSourceId === droppedAction.actionSourceId);
+      const targetActions = this.getOrCreateTargetActions(droppedAction.actionSourceId);
+      if (startActionSourceIndex === 0) {
+        startActionSourceIndex -= targetActions.findIndex(element => element.id === action[0].id);
+      }
+      moveItemInArray(targetActions, event.previousIndex - startActionSourceIndex, event.currentIndex - startActionSourceIndex);
+      this.onActionsUpdated();
+    });
   }
 
   addAction($event: Event) {
@@ -180,7 +235,8 @@ export class ManageWidgetActionsComponent extends PageComponent implements OnIni
         isAdd,
         callbacks: this.callbacks,
         actionsData,
-        action: deepClone(action)
+        action: deepClone(action),
+        widgetType: this.widgetType
       }
     }).afterClosed().subscribe(
       (res) => {
@@ -286,22 +342,25 @@ export class ManageWidgetActionsComponent extends PageComponent implements OnIni
     this.disabled = isDisabled;
   }
 
-  writeValue(obj: WidgetActionsData): void {
-    this.innerValue = obj;
-    if (this.innerValue) {
-      setTimeout(() => {
+  writeValue(actions?: {[actionSourceId: string]: Array<WidgetActionDescriptor>}): void {
+    this.innerValue = {
+      actionsMap: actions || {},
+      actionSources: this.actionSources || {}
+    };
+    setTimeout(() => {
+      if (!this.destroyed) {
         this.dataSource.setActions(this.innerValue);
         if (this.viewsInited) {
           this.resetSortAndFilter(true);
         } else {
           this.dirtyValue = true;
         }
-      }, 0);
-    }
+      }
+    }, 0);
   }
 
   private onActionsUpdated() {
     this.updateData(true);
-    this.propagateChange(this.innerValue);
+    this.propagateChange(this.innerValue.actionsMap);
   }
 }

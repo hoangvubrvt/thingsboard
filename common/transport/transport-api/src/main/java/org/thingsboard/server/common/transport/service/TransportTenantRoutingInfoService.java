@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@
 package org.thingsboard.server.common.transport.service;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.thingsboard.server.common.data.TenantProfile;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.transport.TransportService;
-import org.thingsboard.server.gen.transport.TransportProtos.GetTenantRoutingInfoRequestMsg;
-import org.thingsboard.server.gen.transport.TransportProtos.GetTenantRoutingInfoResponseMsg;
+import org.thingsboard.server.common.transport.TransportTenantProfileCache;
 import org.thingsboard.server.queue.discovery.TenantRoutingInfo;
 import org.thingsboard.server.queue.discovery.TenantRoutingInfoService;
 
@@ -32,21 +29,16 @@ import org.thingsboard.server.queue.discovery.TenantRoutingInfoService;
 @ConditionalOnExpression("'${service.type:null}'=='tb-transport'")
 public class TransportTenantRoutingInfoService implements TenantRoutingInfoService {
 
-    private TransportService transportService;
+    private final TransportTenantProfileCache tenantProfileCache;
 
-    @Lazy
-    @Autowired
-    public void setTransportService(TransportService transportService) {
-        this.transportService = transportService;
+    public TransportTenantRoutingInfoService(TransportTenantProfileCache tenantProfileCache) {
+        this.tenantProfileCache = tenantProfileCache;
     }
 
     @Override
     public TenantRoutingInfo getRoutingInfo(TenantId tenantId) {
-        GetTenantRoutingInfoRequestMsg msg = GetTenantRoutingInfoRequestMsg.newBuilder()
-                .setTenantIdMSB(tenantId.getId().getMostSignificantBits())
-                .setTenantIdLSB(tenantId.getId().getLeastSignificantBits())
-                .build();
-        GetTenantRoutingInfoResponseMsg routingInfo = transportService.getRoutingInfo(msg);
-        return new TenantRoutingInfo(tenantId, routingInfo.getIsolatedTbCore(), routingInfo.getIsolatedTbRuleEngine());
+        TenantProfile profile = tenantProfileCache.get(tenantId);
+        return new TenantRoutingInfo(tenantId, profile.getId(), profile.isIsolatedTbRuleEngine());
     }
+
 }

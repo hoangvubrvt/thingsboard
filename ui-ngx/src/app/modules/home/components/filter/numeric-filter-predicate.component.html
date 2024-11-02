@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -15,16 +15,17 @@
     limitations under the License.
 
 -->
-<div fxFlex fxLayout="row" fxLayoutAlign="start start" fxLayoutGap="8px" [formGroup]="numericFilterPredicateFormGroup">
-  <mat-form-field floatLabel="always" hideRequiredMarker fxFlex="40" class="mat-block">
-    <mat-label></mat-label>
+<div class="flex flex-1 flex-row items-start justify-start gap-2" [formGroup]="numericFilterPredicateFormGroup">
+  <mat-form-field hideRequiredMarker class="mat-block max-w-30% flex-full">
     <mat-select required formControlName="operation" placeholder="{{'filter.operation.operation' | translate}}">
       <mat-option *ngFor="let operation of numericOperations" [value]="operation">
         {{numericOperationTranslations.get(numericOperationEnum[operation]) | translate}}
       </mat-option>
     </mat-select>
   </mat-form-field>
-  <tb-filter-predicate-value fxFlex="60"
+  <tb-filter-predicate-value [allowUserDynamicSource]="allowUserDynamicSource"
+                             [onlyUserDynamicSource]="onlyUserDynamicSource"
+                             class="max-w-70% flex-full"
                              [valueType]="valueType"
                              formControlName="value">
   </tb-filter-predicate-value>

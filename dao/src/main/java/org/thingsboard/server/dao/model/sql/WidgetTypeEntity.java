@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,43 +16,24 @@
 package org.thingsboard.server.dao.model.sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
-import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.data.id.WidgetTypeId;
+import org.thingsboard.server.common.data.widget.BaseWidgetType;
 import org.thingsboard.server.common.data.widget.WidgetType;
-import org.thingsboard.server.dao.model.BaseEntity;
-import org.thingsboard.server.dao.model.BaseSqlEntity;
 import org.thingsboard.server.dao.model.ModelConstants;
-import org.thingsboard.server.dao.util.mapping.JsonStringType;
-
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.Table;
-import java.util.UUID;
+import org.thingsboard.server.dao.util.mapping.JsonConverter;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
 @Entity
-@TypeDef(name = "json", typeClass = JsonStringType.class)
-@Table(name = ModelConstants.WIDGET_TYPE_COLUMN_FAMILY_NAME)
-public final class WidgetTypeEntity  extends BaseSqlEntity<WidgetType> implements BaseEntity<WidgetType> {
+@Table(name = ModelConstants.WIDGET_TYPE_TABLE_NAME)
+public final class WidgetTypeEntity extends AbstractWidgetTypeEntity<WidgetType> {
 
-    @Column(name = ModelConstants.WIDGET_TYPE_TENANT_ID_PROPERTY)
-    private UUID tenantId;
-
-    @Column(name = ModelConstants.WIDGET_TYPE_BUNDLE_ALIAS_PROPERTY)
-    private String bundleAlias;
-
-    @Column(name = ModelConstants.WIDGET_TYPE_ALIAS_PROPERTY)
-    private String alias;
-
-    @Column(name = ModelConstants.WIDGET_TYPE_NAME_PROPERTY)
-    private String name;
-
-    @Type(type="json")
+    @Convert(converter = JsonConverter.class)
     @Column(name = ModelConstants.WIDGET_TYPE_DESCRIPTOR_PROPERTY)
     private JsonNode descriptor;
 
@@ -60,30 +41,10 @@ public final class WidgetTypeEntity  extends BaseSqlEntity<WidgetType> implement
         super();
     }
 
-    public WidgetTypeEntity(WidgetType widgetType) {
-        if (widgetType.getId() != null) {
-            this.setUuid(widgetType.getId().getId());
-        }
-        this.setCreatedTime(widgetType.getCreatedTime());
-        if (widgetType.getTenantId() != null) {
-            this.tenantId = widgetType.getTenantId().getId();
-        }
-        this.bundleAlias = widgetType.getBundleAlias();
-        this.alias = widgetType.getAlias();
-        this.name = widgetType.getName();
-        this.descriptor = widgetType.getDescriptor();
-    }
-
     @Override
     public WidgetType toData() {
-        WidgetType widgetType = new WidgetType(new WidgetTypeId(this.getUuid()));
-        widgetType.setCreatedTime(createdTime);
-        if (tenantId != null) {
-            widgetType.setTenantId(new TenantId(tenantId));
-        }
-        widgetType.setBundleAlias(bundleAlias);
-        widgetType.setAlias(alias);
-        widgetType.setName(name);
+        BaseWidgetType baseWidgetType = super.toBaseWidgetType();
+        WidgetType widgetType = new WidgetType(baseWidgetType);
         widgetType.setDescriptor(descriptor);
         return widgetType;
     }

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,19 +14,14 @@
 /// limitations under the License.
 ///
 
-import { Component, forwardRef, Input, OnInit } from '@angular/core';
+import { Component, forwardRef, Inject, Input, OnInit } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import {
-  ComplexFilterPredicate,
-  ComplexFilterPredicateInfo,
-  EntityKeyValueType
-} from '@shared/models/query/query.models';
+import { ComplexFilterPredicateInfo, EntityKeyValueType } from '@shared/models/query/query.models';
 import { MatDialog } from '@angular/material/dialog';
-import {
-  ComplexFilterPredicateDialogComponent,
-  ComplexFilterPredicateDialogData
-} from '@home/components/filter/complex-filter-predicate-dialog.component';
 import { deepClone } from '@core/utils';
+import { ComplexFilterPredicateDialogData } from '@home/components/filter/filter-component.models';
+import { COMPLEX_FILTER_PREDICATE_DIALOG_COMPONENT_TOKEN } from '@home/components/tokens';
+import { ComponentType } from '@angular/cdk/portal';
 
 @Component({
   selector: 'tb-complex-filter-predicate',
@@ -48,11 +43,18 @@ export class ComplexFilterPredicateComponent implements ControlValueAccessor, On
 
   @Input() key: string;
 
+  @Input() displayUserParameters = true;
+
+  @Input() allowUserDynamicSource = true;
+
+  @Input() onlyUserDynamicSource = false;
+
   private propagateChange = null;
 
   private complexFilterPredicate: ComplexFilterPredicateInfo;
 
-  constructor(private dialog: MatDialog) {
+  constructor(@Inject(COMPLEX_FILTER_PREDICATE_DIALOG_COMPONENT_TOKEN) private complexFilterPredicateDialogComponent: ComponentType<any>,
+              private dialog: MatDialog) {
   }
 
   ngOnInit(): void {
@@ -65,7 +67,7 @@ export class ComplexFilterPredicateComponent implements ControlValueAccessor, On
   registerOnTouched(fn: any): void {
   }
 
-  setDisabledState?(isDisabled: boolean): void {
+  setDisabledState(isDisabled: boolean): void {
     this.disabled = isDisabled;
   }
 
@@ -73,17 +75,20 @@ export class ComplexFilterPredicateComponent implements ControlValueAccessor, On
     this.complexFilterPredicate = predicate;
   }
 
-  private openComplexFilterDialog() {
-    this.dialog.open<ComplexFilterPredicateDialogComponent, ComplexFilterPredicateDialogData,
-      ComplexFilterPredicateInfo>(ComplexFilterPredicateDialogComponent, {
+  public openComplexFilterDialog() {
+    this.dialog.open<any, ComplexFilterPredicateDialogData,
+      ComplexFilterPredicateInfo>(this.complexFilterPredicateDialogComponent, {
       disableClose: true,
       panelClass: ['tb-dialog', 'tb-fullscreen-dialog'],
       data: {
-        complexPredicate: deepClone(this.complexFilterPredicate),
-        disabled: this.disabled,
+        complexPredicate: this.disabled ? this.complexFilterPredicate : deepClone(this.complexFilterPredicate),
+        readonly: this.disabled,
         valueType: this.valueType,
         isAdd: false,
-        key: this.key
+        key: this.key,
+        displayUserParameters: this.displayUserParameters,
+        allowUserDynamicSource: this.allowUserDynamicSource,
+        onlyUserDynamicSource: this.onlyUserDynamicSource
       }
     }).afterClosed().subscribe(
       (result) => {

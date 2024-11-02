@@ -1,5 +1,5 @@
 /*
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,12 @@
 import * as React from 'react';
 import JsonFormUtils from './json-form-utils';
 import { JsonFormFieldProps, JsonFormFieldState } from '@shared/components/json-form/react/json-form.models';
+import { isDefinedAndNotNull } from '@core/utils';
 
 export default ThingsboardBaseComponent => class<P extends JsonFormFieldProps>
   extends React.Component<P, JsonFormFieldState> {
 
-    constructor(props) {
+    constructor(props: P) {
         super(props);
         this.onChangeValidate = this.onChangeValidate.bind(this);
         const value = this.defaultValue();
@@ -41,8 +42,10 @@ export default ThingsboardBaseComponent => class<P extends JsonFormFieldProps>
     onChangeValidate(e, forceUpdate?: boolean) {
         let value = null;
         if (this.props.form.schema.type === 'integer' || this.props.form.schema.type === 'number') {
-            if (e.target.value === null || e.target.value === '') {
+            if (!e || e.target?.value === null || e.target?.value === '') {
                 value = undefined;
+            } else if (typeof e === 'number') {
+                value = Number(e);
             } else if (e.target.value.indexOf('.') === -1) {
                 value = parseInt(e.target.value, 10);
             } else {
@@ -67,10 +70,10 @@ export default ThingsboardBaseComponent => class<P extends JsonFormFieldProps>
     defaultValue() {
         let value = JsonFormUtils.selectOrSet(this.props.form.key, this.props.model);
         if (this.props.form.schema.type === 'boolean') {
-            if (typeof value !== 'boolean' && this.props.form.default) {
+            if (typeof value !== 'boolean' && typeof this.props.form.default === 'boolean') {
                 value = this.props.form.default;
             }
-            if (typeof value !== 'boolean' && this.props.form.schema && this.props.form.schema.default) {
+            if (typeof value !== 'boolean' && this.props.form.schema && typeof this.props.form.schema.default === 'boolean') {
                 value = this.props.form.schema.default;
             }
             if (typeof value !== 'boolean' &&
@@ -79,13 +82,13 @@ export default ThingsboardBaseComponent => class<P extends JsonFormFieldProps>
                 value = false;
             }
         } else if (this.props.form.schema.type === 'integer' || this.props.form.schema.type === 'number') {
-            if (typeof value !== 'number' && this.props.form.default) {
+            if (typeof value !== 'number' && typeof this.props.form.default === 'number') {
                 value = this.props.form.default;
             }
-            if (typeof value !== 'number' && this.props.form.schema && this.props.form.schema.default) {
+            if (typeof value !== 'number' && this.props.form.schema && typeof this.props.form.schema.default === 'number') {
                 value = this.props.form.schema.default;
             }
-            if (typeof value !== 'number' && this.props.form.titleMap && this.props.form.titleMap[0].value) {
+            if (typeof value !== 'number' && this.props.form.titleMap && typeof this.props.form.titleMap[0].value === 'number') {
                 value = this.props.form.titleMap[0].value;
             }
             if (value && typeof value === 'string') {
@@ -96,13 +99,13 @@ export default ThingsboardBaseComponent => class<P extends JsonFormFieldProps>
                 }
             }
         } else {
-            if (!value && this.props.form.default) {
+            if (!value && isDefinedAndNotNull(this.props.form.default)) {
                 value = this.props.form.default;
             }
-            if (!value && this.props.form.schema && this.props.form.schema.default) {
+            if (!value && this.props.form.schema && isDefinedAndNotNull(this.props.form.schema.default)) {
                 value = this.props.form.schema.default;
             }
-            if (!value && this.props.form.titleMap && this.props.form.titleMap[0].value) {
+            if (!value && this.props.form.titleMap && isDefinedAndNotNull(this.props.form.titleMap[0].value)) {
                 value = this.props.form.titleMap[0].value;
             }
         }

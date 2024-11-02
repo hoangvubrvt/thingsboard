@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,35 @@
 package org.thingsboard.server.queue.sqs;
 
 import com.amazonaws.services.sqs.model.QueueAttributeName;
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.common.data.StringUtils;
 
-import javax.annotation.PostConstruct;
 import java.util.HashMap;
 import java.util.Map;
 
 @Component
 @ConditionalOnExpression("'${queue.type:null}'=='aws-sqs'")
 public class TbAwsSqsQueueAttributes {
-    @Value("${queue.aws-sqs.queue-properties.core}")
+    @Value("${queue.aws-sqs.queue-properties.core:}")
     private String coreProperties;
-    @Value("${queue.aws-sqs.queue-properties.rule-engine}")
+    @Value("${queue.aws-sqs.queue-properties.rule-engine:}")
     private String ruleEngineProperties;
-    @Value("${queue.aws-sqs.queue-properties.transport-api}")
+    @Value("${queue.aws-sqs.queue-properties.transport-api:}")
     private String transportApiProperties;
-    @Value("${queue.aws-sqs.queue-properties.notifications}")
+    @Value("${queue.aws-sqs.queue-properties.notifications:}")
     private String notificationsProperties;
-    @Value("${queue.aws-sqs.queue-properties.js-executor}")
+    @Value("${queue.aws-sqs.queue-properties.js-executor:}")
     private String jsExecutorProperties;
+    @Value("${queue.aws-sqs.queue-properties.ota-updates:}")
+    private String otaProperties;
+    @Value("${queue.aws-sqs.queue-properties.version-control:}")
+    private String vcProperties;
+    @Value("${queue.aws-sqs.queue-properties.edge:}")
+    private String edgeProperties;
 
     @Getter
     private Map<String, String> coreAttributes;
@@ -49,6 +56,12 @@ public class TbAwsSqsQueueAttributes {
     private Map<String, String> notificationsAttributes;
     @Getter
     private Map<String, String> jsExecutorAttributes;
+    @Getter
+    private Map<String, String> otaAttributes;
+    @Getter
+    private Map<String, String> vcAttributes;
+    @Getter
+    private Map<String, String> edgeAttributes;
 
     private final Map<String, String> defaultAttributes = new HashMap<>();
 
@@ -61,22 +74,32 @@ public class TbAwsSqsQueueAttributes {
         transportApiAttributes = getConfigs(transportApiProperties);
         notificationsAttributes = getConfigs(notificationsProperties);
         jsExecutorAttributes = getConfigs(jsExecutorProperties);
+        otaAttributes = getConfigs(otaProperties);
+        vcAttributes = getConfigs(vcProperties);
+        edgeAttributes = getConfigs(edgeProperties);
     }
 
     private Map<String, String> getConfigs(String properties) {
-        Map<String, String> configs = new HashMap<>();
-        for (String property : properties.split(";")) {
-            int delimiterPosition = property.indexOf(":");
-            String key = property.substring(0, delimiterPosition);
-            String value = property.substring(delimiterPosition + 1);
-            validateAttributeName(key);
-            configs.put(key, value);
-        }
-        configs.putAll(defaultAttributes);
+        Map<String, String> configs = new HashMap<>(defaultAttributes);
+       configs.putAll(toConfigs(properties));
         return configs;
     }
 
-    private void validateAttributeName(String key) {
+    public static Map<String, String> toConfigs(String properties) {
+        Map<String, String> configs = new HashMap<>();
+        if (StringUtils.isNotEmpty(properties)) {
+            for (String property : properties.split(";")) {
+                int delimiterPosition = property.indexOf(":");
+                String key = property.substring(0, delimiterPosition);
+                String value = property.substring(delimiterPosition + 1);
+                validateAttributeName(key);
+                configs.put(key, value);
+            }
+        }
+        return configs;
+    }
+
+    private static void validateAttributeName(String key) {
         QueueAttributeName.fromValue(key);
     }
 }

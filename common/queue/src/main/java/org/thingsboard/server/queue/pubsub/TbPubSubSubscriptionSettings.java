@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,33 @@
  */
 package org.thingsboard.server.queue.pubsub;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.queue.util.PropertyUtils;
 
-import javax.annotation.PostConstruct;
-import java.util.HashMap;
 import java.util.Map;
 
 @Component
 @ConditionalOnExpression("'${queue.type:null}'=='pubsub'")
 public class TbPubSubSubscriptionSettings {
-    @Value("${queue.pubsub.queue-properties.core}")
+
+    @Value("${queue.pubsub.queue-properties.core:}")
     private String coreProperties;
-    @Value("${queue.pubsub.queue-properties.rule-engine}")
+    @Value("${queue.pubsub.queue-properties.rule-engine:}")
     private String ruleEngineProperties;
-    @Value("${queue.pubsub.queue-properties.transport-api}")
+    @Value("${queue.pubsub.queue-properties.transport-api:}")
     private String transportApiProperties;
-    @Value("${queue.pubsub.queue-properties.notifications}")
+    @Value("${queue.pubsub.queue-properties.notifications:}")
     private String notificationsProperties;
-    @Value("${queue.pubsub.queue-properties.js-executor}")
+    @Value("${queue.pubsub.queue-properties.js-executor:}")
     private String jsExecutorProperties;
+    @Value("${queue.pubsub.queue-properties.version-control:}")
+    private String vcProperties;
+    @Value("${queue.pubsub.queue-properties.edge:}")
+    private String edgeProperties;
 
     @Getter
     private Map<String, String> coreSettings;
@@ -48,24 +53,20 @@ public class TbPubSubSubscriptionSettings {
     private Map<String, String> notificationsSettings;
     @Getter
     private Map<String, String> jsExecutorSettings;
+    @Getter
+    private Map<String, String> vcSettings;
+    @Getter
+    private Map<String, String> edgeSettings;
 
     @PostConstruct
     private void init() {
-        coreSettings = getSettings(coreProperties);
-        ruleEngineSettings = getSettings(ruleEngineProperties);
-        transportApiSettings = getSettings(transportApiProperties);
-        notificationsSettings = getSettings(notificationsProperties);
-        jsExecutorSettings = getSettings(jsExecutorProperties);
+        coreSettings = PropertyUtils.getProps(coreProperties);
+        ruleEngineSettings = PropertyUtils.getProps(ruleEngineProperties);
+        transportApiSettings = PropertyUtils.getProps(transportApiProperties);
+        notificationsSettings = PropertyUtils.getProps(notificationsProperties);
+        jsExecutorSettings = PropertyUtils.getProps(jsExecutorProperties);
+        vcSettings = PropertyUtils.getProps(vcProperties);
+        edgeSettings = PropertyUtils.getProps(edgeProperties);
     }
 
-    private Map<String, String> getSettings(String properties) {
-        Map<String, String> configs = new HashMap<>();
-        for (String property : properties.split(";")) {
-            int delimiterPosition = property.indexOf(":");
-            String key = property.substring(0, delimiterPosition);
-            String value = property.substring(delimiterPosition + 1);
-            configs.put(key, value);
-        }
-        return configs;
-    }
 }

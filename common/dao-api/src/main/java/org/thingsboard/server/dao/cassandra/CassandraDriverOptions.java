@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,16 +20,16 @@ import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.config.ProgrammaticDriverConfigLoaderBuilder;
-import com.datastax.oss.driver.api.core.metrics.DefaultSessionMetric;
 import com.datastax.oss.driver.api.core.metrics.DefaultNodeMetric;
+import com.datastax.oss.driver.api.core.metrics.DefaultSessionMetric;
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.dao.util.NoSqlAnyDao;
 
-import javax.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -80,8 +80,22 @@ public class CassandraDriverOptions {
 
     @Value("${cassandra.compression}")
     private String compression;
-    @Value("${cassandra.ssl}")
+    
+    @Value("${cassandra.ssl.enabled}")
     private Boolean ssl;
+    @Value("${cassandra.ssl.key_store}")
+    private String sslKeyStore;
+    @Value("${cassandra.ssl.key_store_password}")
+    private String sslKeyStorePassword;
+    @Value("${cassandra.ssl.trust_store}")
+    private String sslTrustStore;
+    @Value("${cassandra.ssl.trust_store_password}")
+    private String sslTrustStorePassword;
+    @Value("${cassandra.ssl.hostname_validation}")
+    private Boolean sslHostnameValidation;
+    @Value("${cassandra.ssl.cipher_suites}")
+    private List<String> sslCipherSuites;
+    
     @Value("${cassandra.metrics}")
     private Boolean metrics;
 
@@ -120,7 +134,19 @@ public class CassandraDriverOptions {
 
         if (this.ssl) {
             driverConfigBuilder.withString(DefaultDriverOption.SSL_ENGINE_FACTORY_CLASS,
-                    "DefaultSslEngineFactory");
+                    "DefaultSslEngineFactory")
+                .withBoolean(DefaultDriverOption.SSL_HOSTNAME_VALIDATION, this.sslHostnameValidation);
+            if(!this.sslTrustStore.isEmpty()) {
+                driverConfigBuilder.withString(DefaultDriverOption.SSL_TRUSTSTORE_PATH, this.sslTrustStore)
+                    .withString(DefaultDriverOption.SSL_TRUSTSTORE_PASSWORD, this.sslTrustStorePassword);
+            }
+            if(!this.sslKeyStore.isEmpty()) {
+                driverConfigBuilder.withString(DefaultDriverOption.SSL_KEYSTORE_PATH, this.sslKeyStore)
+                    .withString(DefaultDriverOption.SSL_KEYSTORE_PASSWORD, this.sslKeyStorePassword);
+            }
+            if(!this.sslCipherSuites.isEmpty()) {
+                driverConfigBuilder.withStringList(DefaultDriverOption.SSL_CIPHER_SUITES, this.sslCipherSuites);
+            }
         }
 
         if (this.metrics) {

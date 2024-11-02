@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -31,16 +31,17 @@ import { ErrorStateMatcher } from '@angular/material/core';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
-import { FormBuilder, FormControl, FormGroup, FormGroupDirective, NgForm, Validators } from '@angular/forms';
+import { UntypedFormBuilder, UntypedFormControl, UntypedFormGroup, FormGroupDirective, NgForm, Validators } from '@angular/forms';
 import { NEVER, Observable, of } from 'rxjs';
 import { Router } from '@angular/router';
 import { DialogComponent } from '@shared/components/dialog.component';
 import { ContentType } from '@shared/models/constants';
 import { JsonContentComponent } from '@shared/components/json-content.component';
-import { TestScriptInputParams } from '@shared/models/rule-node.models';
+import { ScriptLanguage, TestScriptInputParams } from '@shared/models/rule-node.models';
 import { RuleChainService } from '@core/http/rule-chain.service';
 import { mergeMap } from 'rxjs/operators';
 import { ActionNotificationShow } from '@core/notification/notification.actions';
+import { beautifyJs } from '@shared/models/beautify.models';
 
 export interface NodeScriptTestDialogData {
   script: string;
@@ -48,9 +49,11 @@ export interface NodeScriptTestDialogData {
   functionTitle: string;
   functionName: string;
   argNames: string[];
+  scriptLang?: ScriptLanguage;
   msg?: any;
   metadata?: {[key: string]: string};
   msgType?: string;
+  helpId?: string;
 }
 
 // @dynamic
@@ -87,7 +90,7 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
 
   @ViewChild('payloadContent', {static: true}) payloadContent: JsonContentComponent;
 
-  nodeScriptTestFormGroup: FormGroup;
+  nodeScriptTestFormGroup: UntypedFormGroup;
 
   functionTitle: string;
 
@@ -95,12 +98,16 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
 
   contentTypes = ContentType;
 
+  scriptLanguage = ScriptLanguage;
+
+  scriptLang = this.data.scriptLang ? this.data.scriptLang : ScriptLanguage.JS;
+
   constructor(protected store: Store<AppState>,
               protected router: Router,
               @Inject(MAT_DIALOG_DATA) public data: NodeScriptTestDialogData,
               @SkipSelf() private errorStateMatcher: ErrorStateMatcher,
               public dialogRef: MatDialogRef<NodeScriptTestDialogComponent, string>,
-              public fb: FormBuilder,
+              public fb: UntypedFormBuilder,
               private ruleChainService: RuleChainService) {
     super(store, router, dialogRef);
     this.functionTitle = this.data.functionTitle;
@@ -110,12 +117,17 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
     this.nodeScriptTestFormGroup = this.fb.group({
       payload: this.fb.group({
         msgType: [this.data.msgType, [Validators.required]],
-        msg: [js_beautify(JSON.stringify(this.data.msg), {indent_size: 4}), []],
+        msg: [null, []],
       }),
       metadata: [this.data.metadata, [Validators.required]],
       script: [this.data.script, []],
       output: ['', []]
     });
+    beautifyJs(JSON.stringify(this.data.msg), {indent_size: 4}).subscribe(
+      (res) => {
+        this.nodeScriptTestFormGroup.get('payload').get('msg').patchValue(res, {emitEvent: false});
+      }
+    );
   }
 
   ngAfterViewInit(): void {
@@ -154,7 +166,7 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
     });
   }
 
-  isErrorState(control: FormControl | null, form: FormGroupDirective | NgForm | null): boolean {
+  isErrorState(control: UntypedFormControl | null, form: FormGroupDirective | NgForm | null): boolean {
     const originalErrorState = this.errorStateMatcher.isErrorState(control, form);
     const customErrorState = !!(control && control.invalid && this.submitted);
     return originalErrorState || customErrorState;
@@ -166,7 +178,11 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
 
   test(): void {
     this.testNodeScript().subscribe((output) => {
-      this.nodeScriptTestFormGroup.get('output').setValue(js_beautify(output, {indent_size: 4}));
+      beautifyJs(output, {indent_size: 4}).subscribe(
+        (res) => {
+          this.nodeScriptTestFormGroup.get('output').setValue(res);
+        }
+      );
     });
   }
 
@@ -180,7 +196,7 @@ export class NodeScriptTestDialogComponent extends DialogComponent<NodeScriptTes
         metadata: this.nodeScriptTestFormGroup.get('metadata').value,
         script: this.nodeScriptTestFormGroup.get('script').value
       };
-      return this.ruleChainService.testScript(inputParams).pipe(
+      return this.ruleChainService.testScript(inputParams, this.scriptLang).pipe(
         mergeMap((result) => {
           if (result.error) {
             this.store.dispatch(new ActionNotificationShow(

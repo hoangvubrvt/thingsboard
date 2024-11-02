@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,10 +15,16 @@
 ///
 
 import _ from 'lodash';
-import { Observable, Subject } from 'rxjs';
+import { from, Observable, Subject } from 'rxjs';
 import { finalize, share } from 'rxjs/operators';
-import base64js from 'base64-js';
-import { Datasource } from '@app/shared/models/widget.models';
+import { Datasource, DatasourceData, FormattedData, ReplaceInfo } from '@app/shared/models/widget.models';
+import { EntityId } from '@shared/models/id/entity-id';
+import { NULL_UUID } from '@shared/models/id/has-uuid';
+import { baseDetailsPageByEntityType, EntityType } from '@shared/models/entity-type.models';
+import { HttpErrorResponse } from '@angular/common/http';
+import { TranslateService } from '@ngx-translate/core';
+import { serverErrorCodesTranslations } from '@shared/models/constants';
+import { SubscriptionEntityInfo } from '@core/api/widget-api.models';
 
 const varsRegex = /\${([^}]*)}/g;
 
@@ -77,12 +83,24 @@ export function isUndefined(value: any): boolean {
   return typeof value === 'undefined';
 }
 
+export function isUndefinedOrNull(value: any): boolean {
+  return typeof value === 'undefined' || value === null;
+}
+
 export function isDefined(value: any): boolean {
   return typeof value !== 'undefined';
 }
 
 export function isDefinedAndNotNull(value: any): boolean {
   return typeof value !== 'undefined' && value !== null;
+}
+
+export function isEmptyStr(value: any): boolean {
+  return value === '';
+}
+
+export function isNotEmptyStr(value: any): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 export function isFunction(value: any): boolean {
@@ -101,35 +119,45 @@ export function isNumeric(value: any): boolean {
   return (value - parseFloat(value) + 1) >= 0;
 }
 
+export function isBoolean(value: any): boolean {
+  return typeof value === 'boolean';
+}
+
 export function isString(value: any): boolean {
   return typeof value === 'string';
 }
 
-export function isEmpty(obj: any): boolean {
-  for (const key of Object.keys(obj)) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      return false;
-    }
-  }
-  return true;
+export function isLiteralObject(value: any) {
+  return (!!value) && (value.constructor === Object);
 }
 
-export function formatValue(value: any, dec?: number, units?: string, showZeroDecimals?: boolean): string | undefined {
-  if (isDefinedAndNotNull(value) && isNumeric(value) && (isDefined(dec) || isDefined(units) || Number(value).toString() === value)) {
+export const formatValue = (value: any, dec?: number, units?: string, showZeroDecimals?: boolean): string | undefined => {
+  if (isDefinedAndNotNull(value) && isNumeric(value) &&
+    (isDefinedAndNotNull(dec) || isDefinedAndNotNull(units) || Number(value).toString() === value)) {
     let formatted: string | number = Number(value);
-    if (isDefined(dec)) {
+    if (isDefinedAndNotNull(dec)) {
       formatted = formatted.toFixed(dec);
     }
     if (!showZeroDecimals) {
       formatted = (Number(formatted));
     }
     formatted = formatted.toString();
-    if (isDefined(units) && units.length > 0) {
+    if (isDefinedAndNotNull(units) && units.length > 0) {
       formatted += ' ' + units;
     }
     return formatted;
   } else {
     return value !== null ? value : '';
+  }
+}
+
+export const formatNumberValue = (value: any, dec?: number): number | undefined => {
+  if (isDefinedAndNotNull(value) && isNumeric(value)) {
+    let formatted: string | number = Number(value);
+    if (isDefinedAndNotNull(dec)) {
+      formatted = formatted.toFixed(dec);
+    }
+    return Number(formatted);
   }
 }
 
@@ -156,29 +184,55 @@ export function deleteNullProperties(obj: any) {
 
 export function objToBase64(obj: any): string {
   const json = JSON.stringify(obj);
-  const encoded = utf8Encode(json);
-  return base64js.fromByteArray(encoded);
+  return btoa(encodeURIComponent(json).replace(/%([0-9A-F]{2})/g,
+    function toSolidBytes(match, p1) {
+      return String.fromCharCode(Number('0x' + p1));
+    }));
+}
+
+export function base64toString(b64Encoded: string): string {
+  return decodeURIComponent(atob(b64Encoded).split('').map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+}
+
+export function objToBase64URI(obj: any): string {
+  return encodeURIComponent(objToBase64(obj));
 }
 
 export function base64toObj(b64Encoded: string): any {
-  const encoded: Uint8Array | number[] = base64js.toByteArray(b64Encoded);
-  const json = utf8Decode(encoded);
+  const json = decodeURIComponent(atob(b64Encoded).split('').map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
   return JSON.parse(json);
 }
 
-function utf8Encode(str: string): Uint8Array | number[] {
-  let result: Uint8Array | number[];
-  if (isUndefined(Uint8Array)) {
-    result = utf8ToBytes(str);
-  } else {
-    result = new Uint8Array(utf8ToBytes(str));
-  }
-  return result;
+export function stringToBase64(value: string): string {
+  return btoa(encodeURIComponent(value).replace(/%([0-9A-F]{2})/g,
+    function toSolidBytes(match, p1) {
+      return String.fromCharCode(Number('0x' + p1));
+    }));
 }
 
-function utf8Decode(bytes: Uint8Array | number[]): string {
-  return utf8Slice(bytes, 0, bytes.length);
-}
+export const blobToBase64 = (blob: Blob): Observable<string> => from(new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    }
+  ));
+
+export const blobToText = (blob: Blob): Observable<string> => from(new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsText(blob);
+  }
+));
+
+export const updateFileContent = (file: File, newContent: string): File => {
+  const blob = new Blob([newContent], { type: file.type });
+  return new File([blob], file.name, {type: file.type});
+};
+
+export const createFileFromContent = (content: string, name: string, type: string): File => {
+  const blob = new Blob([content], { type });
+  return new File([blob], name, { type });
+};
 
 const scrollRegex = /(auto|scroll)/;
 
@@ -233,9 +287,9 @@ export function hashCode(str: string): number {
   }
   for (i = 0; i < str.length; i++) {
     char = str.charCodeAt(i);
-    // tslint:disable-next-line:no-bitwise
+    // eslint-disable-next-line no-bitwise
     hash = ((hash << 5) - hash) + char;
-    // tslint:disable-next-line:no-bitwise
+    // eslint-disable-next-line no-bitwise
     hash = hash & hash; // Convert to 32bit integer
   }
   return hash;
@@ -267,129 +321,6 @@ function easeInOut(
   );
 }
 
-function utf8Slice(buf: Uint8Array | number[], start: number, end: number): string {
-  let res = '';
-  let tmp = '';
-  end = Math.min(buf.length, end || Infinity);
-  start = start || 0;
-
-  for (let i = start; i < end; i++) {
-    if (buf[i] <= 0x7F) {
-      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i]);
-      tmp = '';
-    } else {
-      tmp += '%' + buf[i].toString(16);
-    }
-  }
-  return res + decodeUtf8Char(tmp);
-}
-
-function decodeUtf8Char(str: string): string {
-  try {
-    return decodeURIComponent(str);
-  } catch (err) {
-    return String.fromCharCode(0xFFFD); // UTF 8 invalid char
-  }
-}
-
-function utf8ToBytes(input: string, units?: number): number[] {
-  units = units || Infinity;
-  let codePoint: number;
-  const length = input.length;
-  let leadSurrogate: number = null;
-  const bytes: number[] = [];
-  let i = 0;
-
-  for (; i < length; i++) {
-    codePoint = input.charCodeAt(i);
-
-    // is surrogate component
-    if (codePoint > 0xD7FF && codePoint < 0xE000) {
-      // last char was a lead
-      if (leadSurrogate) {
-        // 2 leads in a row
-        if (codePoint < 0xDC00) {
-          units -= 3;
-          if (units > -1) { bytes.push(0xEF, 0xBF, 0xBD); }
-          leadSurrogate = codePoint;
-          continue;
-        } else {
-          // valid surrogate pair
-          // tslint:disable-next-line:no-bitwise
-          codePoint = leadSurrogate - 0xD800 << 10 | codePoint - 0xDC00 | 0x10000;
-          leadSurrogate = null;
-        }
-      } else {
-        // no lead yet
-
-        if (codePoint > 0xDBFF) {
-          // unexpected trail
-          units -= 3;
-          if (units > -1) { bytes.push(0xEF, 0xBF, 0xBD); }
-          continue;
-        } else if (i + 1 === length) {
-          // unpaired lead
-          units -= 3;
-          if (units > -1) { bytes.push(0xEF, 0xBF, 0xBD); }
-          continue;
-        } else {
-          // valid lead
-          leadSurrogate = codePoint;
-          continue;
-        }
-      }
-    } else if (leadSurrogate) {
-      // valid bmp char, but last char was a lead
-      units -= 3;
-      if (units > -1) { bytes.push(0xEF, 0xBF, 0xBD); }
-      leadSurrogate = null;
-    }
-
-    // encode utf8
-    if (codePoint < 0x80) {
-      units -= 1;
-      if (units < 0) { break; }
-      bytes.push(codePoint);
-    } else if (codePoint < 0x800) {
-      units -= 2;
-      if (units < 0) { break; }
-      bytes.push(
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0x6 | 0xC0,
-        // tslint:disable-next-line:no-bitwise
-        codePoint & 0x3F | 0x80
-      );
-    } else if (codePoint < 0x10000) {
-      units -= 3;
-      if (units < 0) { break; }
-      bytes.push(
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0xC | 0xE0,
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0x6 & 0x3F | 0x80,
-        // tslint:disable-next-line:no-bitwise
-        codePoint & 0x3F | 0x80
-      );
-    } else if (codePoint < 0x200000) {
-      units -= 4;
-      if (units < 0) { break; }
-      bytes.push(
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0x12 | 0xF0,
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0xC & 0x3F | 0x80,
-        // tslint:disable-next-line:no-bitwise
-        codePoint >> 0x6 & 0x3F | 0x80,
-        // tslint:disable-next-line:no-bitwise
-        codePoint & 0x3F | 0x80
-      );
-    } else {
-      throw new Error('Invalid code point');
-    }
-  }
-  return bytes;
-}
-
 export function deepClone<T>(target: T, ignoreFields?: string[]): T {
   if (target === null) {
     return target;
@@ -402,8 +333,8 @@ export function deepClone<T>(target: T, ignoreFields?: string[]): T {
     (target as any[]).forEach((v) => { cp.push(v); });
     return cp.map((n: any) => deepClone<any>(n)) as any;
   }
-  if (typeof target === 'object' && target !== {}) {
-    const cp = { ...(target as { [key: string]: any }) } as { [key: string]: any };
+  if (typeof target === 'object') {
+    const cp = {...(target as { [key: string]: any })} as { [key: string]: any };
     Object.keys(cp).forEach(k => {
       if (!ignoreFields || ignoreFields.indexOf(k) === -1) {
         cp[k] = deepClone<any>(cp[k]);
@@ -414,12 +345,50 @@ export function deepClone<T>(target: T, ignoreFields?: string[]): T {
   return target;
 }
 
-export function isEqual(a: any, b: any): boolean {
-  return _.isEqual(a, b);
+export function extractType<T extends object>(target: any, keysOfProps: (keyof T)[]): T {
+  return _.pick(target, keysOfProps);
 }
+
+export const isEqual = (a: any, b: any): boolean => _.isEqual(a, b);
+
+export const isEmpty = (a: any): boolean => _.isEmpty(a);
+
+export const unset = (object: any, path: string | symbol): boolean => _.unset(object, path);
+
+export const setByPath = <T extends object>(object: T, path: string | number | symbol, value: any): T => _.set(object, path, value);
+
+export const isEqualIgnoreUndefined = (a: any, b: any): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (isDefinedAndNotNull(a) && isDefinedAndNotNull(b)) {
+    return isEqual(a, b);
+  } else {
+    return (isUndefinedOrNull(a) || !a) && (isUndefinedOrNull(b) || !b);
+  }
+};
+
+export const isArraysEqualIgnoreUndefined = (a: any[], b: any[]): boolean => {
+  const res = isEqualIgnoreUndefined(a, b);
+  if (!res) {
+    return (isUndefinedOrNull(a) || !a?.length) && (isUndefinedOrNull(b) || !b?.length);
+  } else {
+    return res;
+  }
+};
 
 export function mergeDeep<T>(target: T, ...sources: T[]): T {
   return _.merge(target, ...sources);
+}
+
+function ignoreArrayMergeFunc(target: any, sources: any) {
+  if (_.isArray(target)) {
+    return sources;
+  }
+}
+
+export function mergeDeepIgnoreArray<T>(target: T, ...sources: T[]): T {
+  return _.mergeWith(target, ...sources, ignoreArrayMergeFunc);
 }
 
 export function guid(): string {
@@ -436,12 +405,13 @@ const SNAKE_CASE_REGEXP = /[A-Z]/g;
 
 export function snakeCase(name: string, separator: string): string {
   separator = separator || '_';
-  return name.replace(SNAKE_CASE_REGEXP, (letter, pos) => {
-    return (pos ? separator : '') + letter.toLowerCase();
-  });
+  return name.replace(SNAKE_CASE_REGEXP, (letter, pos) => (pos ? separator : '') + letter.toLowerCase());
 }
 
 export function getDescendantProp(obj: any, path: string): any {
+  if (obj.hasOwnProperty(path)) {
+    return obj[path];
+  }
   return path.split('.').reduce((acc, part) => acc && acc[part], obj);
 }
 
@@ -452,14 +422,14 @@ export function insertVariable(pattern: string, name: string, value: any): strin
     const variable = match[0];
     const variableName = match[1];
     if (variableName === name) {
-      result = result.split(variable).join(value);
+      result = result.replace(variable, value);
     }
     match = varsRegex.exec(pattern);
   }
   return result;
 }
 
-export function createLabelFromDatasource(datasource: Datasource, pattern: string): string {
+export const createLabelFromDatasource = (datasource: Datasource, pattern: string): string => {
   let label = pattern;
   if (!datasource) {
     return label;
@@ -469,21 +439,252 @@ export function createLabelFromDatasource(datasource: Datasource, pattern: strin
     const variable = match[0];
     const variableName = match[1];
     if (variableName === 'dsName') {
-      label = label.split(variable).join(datasource.name);
+      label = label.replace(variable, datasource.name);
     } else if (variableName === 'entityName') {
-      label = label.split(variable).join(datasource.entityName);
+      label = label.replace(variable, datasource.entityName);
     } else if (variableName === 'deviceName') {
-      label = label.split(variable).join(datasource.entityName);
+      label = label.replace(variable, datasource.entityName);
     } else if (variableName === 'entityLabel') {
-      label = label.split(variable).join(datasource.entityLabel || datasource.entityName);
+      label = label.replace(variable, datasource.entityLabel || datasource.entityName);
     } else if (variableName === 'aliasName') {
-      label = label.split(variable).join(datasource.aliasName);
+      label = label.replace(variable, datasource.aliasName);
     } else if (variableName === 'entityDescription') {
-      label = label.split(variable).join(datasource.entityDescription);
+      label = label.replace(variable, datasource.entityDescription);
     }
     match = varsRegex.exec(pattern);
   }
   return label;
+};
+
+export const createLabelFromSubscriptionEntityInfo = (entityInfo: SubscriptionEntityInfo, pattern: string): string => {
+  let label = pattern;
+  if (!entityInfo) {
+    return label;
+  }
+  let match = varsRegex.exec(pattern);
+  while (match !== null) {
+    const variable = match[0];
+    const variableName = match[1];
+    if (variableName === 'dsName') {
+      label = label.replace(variable, entityInfo.entityName);
+    } else if (variableName === 'entityName') {
+      label = label.replace(variable, entityInfo.entityName);
+    } else if (variableName === 'deviceName') {
+      label = label.replace(variable, entityInfo.entityName);
+    } else if (variableName === 'entityLabel') {
+      label = label.replace(variable, entityInfo.entityLabel || entityInfo.entityName);
+    } else if (variableName === 'aliasName') {
+      label = label.replace(variable, entityInfo.entityName);
+    } else if (variableName === 'entityDescription') {
+      label = label.replace(variable, entityInfo.entityDescription);
+    }
+    match = varsRegex.exec(pattern);
+  }
+  return label;
+};
+
+export const hasDatasourceLabelsVariables = (pattern: string): boolean => varsRegex.test(pattern) !== null;
+
+export function formattedDataFormDatasourceData(input: DatasourceData[], dataIndex?: number, ts?: number): FormattedData[] {
+  return _(input).groupBy(el => el.datasource.entityName + el.datasource.entityType)
+    .values().value().map((entityArray, i) => {
+      const datasource = entityArray[0].datasource;
+      const obj = formattedDataFromDatasource(datasource, i);
+      entityArray.filter(el => el.data.length).forEach(el => {
+        const index = isDefined(dataIndex) ? dataIndex : el.data.length - 1;
+        const dataSet = isDefined(ts) ? el.data.find(data => data[0] === ts) : el.data[index];
+        if (dataSet !== undefined && (!obj.hasOwnProperty(el.dataKey.label) || dataSet[1] !== '')) {
+          obj[el.dataKey.label] = dataSet[1];
+          obj[el.dataKey.label + '|ts'] = dataSet[0];
+          if (el.dataKey.label.toLowerCase() === 'type') {
+            obj.deviceType = dataSet[1];
+          }
+        }
+      });
+      return obj;
+    });
+}
+
+export function formattedDataArrayFromDatasourceData(input: DatasourceData[]): FormattedData[][] {
+  return _(input).groupBy(el => el.datasource.entityName)
+    .values().value().map((entityArray, dsIndex) => {
+      const timeDataMap: {[time: number]: FormattedData} = {};
+      entityArray.filter(e => e.data.length).forEach(entity => {
+        entity.data.forEach(tsData => {
+          const time = tsData[0];
+          const value = tsData[1];
+          let data = timeDataMap[time];
+          if (!data) {
+            const datasource = entity.datasource;
+            data = formattedDataFromDatasource(datasource, dsIndex);
+            data.time = time;
+            timeDataMap[time] = data;
+          }
+          data[entity.dataKey.label] = value;
+          data[entity.dataKey.label + '|ts'] = time;
+          if (entity.dataKey.label.toLowerCase() === 'type') {
+            data.deviceType = value;
+          }
+        });
+      });
+      return _.values(timeDataMap);
+    });
+}
+
+export function formattedDataFromDatasource(datasource: Datasource, dsIndex: number): FormattedData {
+  return {
+    entityName: datasource.entityName,
+    deviceName: datasource.entityName,
+    entityId: datasource.entityId,
+    entityType: datasource.entityType,
+    entityLabel: datasource.entityLabel || datasource.entityName,
+    entityDescription: datasource.entityDescription,
+    aliasName: datasource.aliasName,
+    $datasource: datasource,
+    dsIndex,
+    dsName: datasource.name,
+    deviceType: null
+  };
+}
+
+export function flatFormattedData(input: FormattedData[]): FormattedData {
+  let result: FormattedData = {} as FormattedData;
+  if (input.length) {
+    for (const toMerge of input) {
+      result = {...result, ...toMerge};
+    }
+    const sourceData = input[0];
+    result.entityName =  sourceData.entityName;
+    result.deviceName = sourceData.deviceName;
+    result.entityId =  sourceData.entityId;
+    result.entityType =  sourceData.entityType;
+    result.entityLabel = sourceData.entityLabel;
+    result.entityDescription = sourceData.entityDescription;
+    result.aliasName = sourceData.aliasName;
+    result.$datasource =  sourceData.$datasource;
+    result.dsIndex =  sourceData.dsIndex;
+    result.dsName = sourceData.dsName;
+    result.deviceType =  sourceData.deviceType;
+  }
+  return result;
+}
+
+export function flatDataWithoutOverride(input: FormattedData[]): FormattedData {
+  const result: FormattedData = {} as FormattedData;
+  input.forEach((data) => {
+    Object.keys(data).forEach((key) => {
+      if (!isDefinedAndNotNull(result[key]) || isEmptyStr(result[key])) {
+        result[key] = data[key];
+      }
+    });
+  });
+  return result;
+}
+
+export function mergeFormattedData(first: FormattedData[], second: FormattedData[]): FormattedData[] {
+  const merged = first.concat(second);
+  return _(merged).groupBy(el => el.$datasource)
+    .values().value().map((formattedDataArray, i) => {
+      let res = formattedDataArray[0];
+      if (formattedDataArray.length > 1) {
+        const toMerge = formattedDataArray[1];
+        res = {...res, ...toMerge};
+      }
+      return res;
+    });
+}
+
+export function processDataPattern(pattern: string, data: FormattedData): Array<ReplaceInfo> {
+  const replaceInfo: Array<ReplaceInfo> = [];
+  try {
+    const reg = /\${([^}]*)}/g;
+    let match = reg.exec(pattern);
+    while (match !== null) {
+      const variableInfo: ReplaceInfo = {
+        dataKeyName: '',
+        valDec: 2,
+        variable: ''
+      };
+      const variable = match[0];
+      let label = match[1];
+      let valDec = 2;
+      const splitValues = label.split(':');
+      if (splitValues.length > 1) {
+        label = splitValues[0];
+        valDec = parseFloat(splitValues[1]);
+      }
+
+      variableInfo.variable = variable;
+      variableInfo.valDec = valDec;
+
+      if (label.startsWith('#')) {
+        const keyIndexStr = label.substring(1);
+        const n = Math.floor(Number(keyIndexStr));
+        if (String(n) === keyIndexStr && n >= 0) {
+          variableInfo.dataKeyName = data.$datasource.dataKeys[n].label;
+        }
+      } else {
+        variableInfo.dataKeyName = label;
+      }
+      replaceInfo.push(variableInfo);
+
+      match = reg.exec(pattern);
+    }
+  } catch (ex) {
+    console.log(ex, pattern);
+  }
+  return replaceInfo;
+}
+
+export function fillDataPattern(pattern: string, replaceInfo: Array<ReplaceInfo>, data: FormattedData) {
+  let text = createLabelFromDatasource(data.$datasource, pattern);
+  if (replaceInfo) {
+    for (const variableInfo of replaceInfo) {
+      let txtVal = '';
+      if (variableInfo.dataKeyName && isDefinedAndNotNull(data[variableInfo.dataKeyName])) {
+        const varData = data[variableInfo.dataKeyName];
+        if (isNumber(varData)) {
+          txtVal = padValue(varData, variableInfo.valDec);
+        } else {
+          txtVal = varData;
+        }
+      }
+      text = text.replace(variableInfo.variable, txtVal);
+    }
+  }
+  return text;
+}
+
+export function createLabelFromPattern(pattern: string, data: FormattedData): string {
+  const replaceInfo = processDataPattern(pattern, data);
+  return fillDataPattern(pattern, replaceInfo, data);
+}
+
+export function parseFunction(source: any, params: string[] = ['def']): (...args: any[]) => any {
+  let res = null;
+  if (source?.length) {
+    try {
+      res = new Function(...params, source);
+    }
+    catch (err) {
+      res = null;
+    }
+  }
+  return res;
+}
+
+export function safeExecute(func: (...args: any[]) => any, params = []) {
+  let res = null;
+  if (func && typeof (func) === 'function') {
+    try {
+      res = func(...params);
+    }
+    catch (err) {
+      console.log('error in external function:', err);
+      res = null;
+    }
+  }
+  return res;
 }
 
 export function padValue(val: any, dec: number): string {
@@ -502,3 +703,202 @@ export function padValue(val: any, dec: number): string {
   strVal = (n ? '-' : '') + strVal;
   return strVal;
 }
+
+export function baseUrl(): string {
+  let url = window.location.protocol + '//' + window.location.hostname;
+  const port = window.location.port;
+  if (port && port.length > 0 && port !== '80' && port !== '443') {
+    url += ':' + port;
+  }
+  return url;
+}
+
+export function sortObjectKeys<T>(obj: T): T {
+  return Object.keys(obj).sort().reduce((acc, key) => {
+    acc[key] = obj[key];
+    return acc;
+  }, {} as T);
+}
+
+export function deepTrim<T>(obj: T): T {
+  if (isNumber(obj) || isUndefined(obj) || isString(obj) || obj === null || obj instanceof File) {
+    return obj;
+  }
+  return Object.keys(obj).reduce((acc, curr) => {
+    if (isString(obj[curr])) {
+      acc[curr] = obj[curr].trim();
+    } else if (isObject(obj[curr])) {
+      acc[curr] = deepTrim(obj[curr]);
+    } else {
+      acc[curr] = obj[curr];
+    }
+    return acc;
+  }, (Array.isArray(obj) ? [] : {}) as T);
+}
+
+export function generateSecret(length?: number): string {
+  if (isUndefined(length) || length == null) {
+    length = 1;
+  }
+  const l = length > 10 ? 10 : length;
+  const str = Math.random().toString(36).substr(2, l);
+  if (str.length >= length) {
+    return str;
+  }
+  return str.concat(generateSecret(length - str.length));
+}
+
+export function validateEntityId(entityId: EntityId | null): boolean {
+    return isDefinedAndNotNull(entityId?.id) && entityId.id !== NULL_UUID && isDefinedAndNotNull(entityId?.entityType);
+}
+
+export function isMobileApp(): boolean {
+  return isDefined((window as any).flutter_inappwebview);
+}
+
+const alphanumericCharacters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const alphanumericCharactersLength = alphanumericCharacters.length;
+
+export function randomAlphanumeric(length: number): string {
+  let result = '';
+  for ( let i = 0; i < length; i++ ) {
+    result += alphanumericCharacters.charAt(Math.floor(Math.random() * alphanumericCharactersLength));
+  }
+  return result;
+}
+
+export function getEntityDetailsPageURL(id: string, entityType: EntityType): string {
+  return baseDetailsPageByEntityType.has(entityType) ? `${baseDetailsPageByEntityType.get(entityType)}/${id}` : '';
+}
+
+export function parseHttpErrorMessage(errorResponse: HttpErrorResponse,
+                                      translate: TranslateService, responseType?: string): {message: string; timeout: number} {
+  let error = null;
+  let errorMessage: string;
+  let timeout = 0;
+  if (responseType === 'text') {
+    try {
+      error = errorResponse.error ? JSON.parse(errorResponse.error) : null;
+    } catch (e) {}
+  } else {
+    error = errorResponse.error;
+  }
+  if (error && !error.message) {
+    errorMessage = prepareMessageFromData(error);
+  } else if (error && error.message) {
+    errorMessage = error.message;
+    timeout = error.timeout ? error.timeout : 0;
+  } else {
+    errorMessage = `Unhandled error code ${error ? error.status : '\'Unknown\''}`;
+  }
+  if (isObject(errorMessage)) {
+    let errorText = `${errorResponse.status}: `;
+    let errorKey = null;
+    if ((errorMessage as any).errorCode) {
+      errorKey = serverErrorCodesTranslations.get((errorMessage as any).errorCode);
+    }
+    errorText += errorKey ? translate.instant(errorKey) : errorResponse.statusText;
+    errorMessage = errorText;
+  }
+  return {message: errorMessage, timeout};
+}
+
+function prepareMessageFromData(data): string {
+  if (typeof data === 'object' && data.constructor === ArrayBuffer) {
+    const msg = String.fromCharCode.apply(null, new Uint8Array(data));
+    try {
+      const msgObj = JSON.parse(msg);
+      if (msgObj.message) {
+        return msgObj.message;
+      } else {
+        return msg;
+      }
+    } catch (e) {
+      return msg;
+    }
+  } else {
+    return data;
+  }
+}
+
+export function genNextLabel(name: string, datasources: Datasource[]): string {
+  let label = name;
+  let i = 1;
+  let matches = false;
+  if (datasources) {
+    do {
+      matches = false;
+      datasources.forEach((datasource) => {
+        if (datasource) {
+          if (datasource.dataKeys) {
+            datasource.dataKeys.forEach((dataKey) => {
+              if (dataKey?.label === label) {
+                i++;
+                label = name + ' ' + i;
+                matches = true;
+              }
+            });
+          }
+          if (datasource.latestDataKeys) {
+            datasource.latestDataKeys.forEach((dataKey) => {
+              if (dataKey?.label === label) {
+                i++;
+                label = name + ' ' + i;
+                matches = true;
+              }
+            });
+          }
+        }
+      });
+    } while (matches);
+  }
+  return label;
+}
+
+export const getOS = (): string => {
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const macosPlatforms = /(macintosh|macintel|macppc|mac68k|macos|mac_powerpc)/i;
+  const windowsPlatforms = /(win32|win64|windows|wince)/i;
+  const iosPlatforms = /(iphone|ipad|ipod|darwin|ios)/i;
+  let os = null;
+
+  if (macosPlatforms.test(userAgent)) {
+    os = 'macos';
+  } else if (iosPlatforms.test(userAgent)) {
+    os = 'ios';
+  } else if (windowsPlatforms.test(userAgent)) {
+    os = 'windows';
+  } else if (/android/.test(userAgent)) {
+    os = 'android';
+  } else if (/linux/.test(userAgent)) {
+    os = 'linux';
+  }
+
+  return os;
+};
+
+export const isSafari = (): boolean => {
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  return /^((?!chrome|android).)*safari/i.test(userAgent);
+};
+
+export const isFirefox = (): boolean => {
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  return /^((?!seamonkey).)*firefox/i.test(userAgent);
+};
+
+export const camelCase = (str: string): string => {
+  return _.camelCase(str);
+};
+
+export const convertKeysToCamelCase = (obj: Record<string, any>): Record<string, any> => {
+  return _.mapKeys(obj, (value, key) => _.camelCase(key));
+};
+
+export const unwrapModule = (module: any) : any => {
+  if ('default' in module && Object.keys(module).length === 1) {
+    return module.default;
+  } else {
+    return module;
+  }
+};

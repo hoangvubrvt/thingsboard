@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,43 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableSet;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.mqtt.*;
+import io.netty.handler.codec.mqtt.MqttDecoder;
+import io.netty.handler.codec.mqtt.MqttEncoder;
+import io.netty.handler.codec.mqtt.MqttFixedHeader;
+import io.netty.handler.codec.mqtt.MqttMessage;
+import io.netty.handler.codec.mqtt.MqttMessageIdVariableHeader;
+import io.netty.handler.codec.mqtt.MqttMessageType;
+import io.netty.handler.codec.mqtt.MqttPublishMessage;
+import io.netty.handler.codec.mqtt.MqttPublishVariableHeader;
+import io.netty.handler.codec.mqtt.MqttQoS;
+import io.netty.handler.codec.mqtt.MqttSubscribeMessage;
+import io.netty.handler.codec.mqtt.MqttSubscribePayload;
+import io.netty.handler.codec.mqtt.MqttTopicSubscription;
+import io.netty.handler.codec.mqtt.MqttUnsubscribeMessage;
+import io.netty.handler.codec.mqtt.MqttUnsubscribePayload;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.collection.IntObjectHashMap;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import org.thingsboard.common.util.ListeningExecutor;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,16 +63,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Represents an MqttClientImpl connected to a single MQTT server. Will try to keep the connection going at all times
  */
 @SuppressWarnings({"WeakerAccess", "unused"})
+@Slf4j
 final class MqttClientImpl implements MqttClient {
 
     private final Set<String> serverSubscriptions = new HashSet<>();
-    private final IntObjectHashMap<MqttPendingUnsubscription> pendingServerUnsubscribes = new IntObjectHashMap<>();
-    private final IntObjectHashMap<MqttIncomingQos2Publish> qos2PendingIncomingPublishes = new IntObjectHashMap<>();
-    private final IntObjectHashMap<MqttPendingPublish> pendingPublishes = new IntObjectHashMap<>();
+    private final ConcurrentMap<Integer, MqttPendingUnsubscription> pendingServerUnsubscribes = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, MqttIncomingQos2Publish> qos2PendingIncomingPublishes = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, MqttPendingPublish> pendingPublishes = new ConcurrentHashMap<>();
     private final HashMultimap<String, MqttSubscription> subscriptions = HashMultimap.create();
-    private final IntObjectHashMap<MqttPendingSubscription> pendingSubscriptions = new IntObjectHashMap<>();
+    private final ConcurrentMap<Integer, MqttPendingSubscription> pendingSubscriptions = new ConcurrentHashMap<>();
     private final Set<String> pendingSubscribeTopics = new HashSet<>();
-    private final HashMultimap<MqttHandler, MqttSubscription> handlerToSubscribtion = HashMultimap.create();
+    private final HashMultimap<MqttHandler, MqttSubscription> handlerToSubscription = HashMultimap.create();
     private final AtomicInteger nextMessageId = new AtomicInteger(1);
 
     private final MqttClientConfig clientConfig;
@@ -62,15 +88,16 @@ final class MqttClientImpl implements MqttClient {
     private volatile boolean reconnect = false;
     private String host;
     private int port;
+    @Getter
     private MqttClientCallback callback;
 
+    private final ListeningExecutor handlerExecutor;
 
     /**
      * Construct the MqttClientImpl with default config
      */
-    public MqttClientImpl(MqttHandler defaultHandler) {
-        this.clientConfig = new MqttClientConfig();
-        this.defaultHandler = defaultHandler;
+    public MqttClientImpl(MqttHandler defaultHandler, ListeningExecutor handlerExecutor) {
+        this(new MqttClientConfig(), defaultHandler, handlerExecutor);
     }
 
     /**
@@ -79,9 +106,10 @@ final class MqttClientImpl implements MqttClient {
      *
      * @param clientConfig The config object to use while looking for settings
      */
-    public MqttClientImpl(MqttClientConfig clientConfig, MqttHandler defaultHandler) {
+    public MqttClientImpl(MqttClientConfig clientConfig, MqttHandler defaultHandler, ListeningExecutor handlerExecutor) {
         this.clientConfig = clientConfig;
         this.defaultHandler = defaultHandler;
+        this.handlerExecutor = handlerExecutor;
     }
 
     /**
@@ -92,7 +120,7 @@ final class MqttClientImpl implements MqttClient {
      * @return A future which will be completed when the connection is opened and we received an CONNACK
      */
     @Override
-    public Future<MqttConnectResult> connect(String host) {
+    public Promise<MqttConnectResult> connect(String host) {
         return connect(host, 1883);
     }
 
@@ -104,11 +132,12 @@ final class MqttClientImpl implements MqttClient {
      * @return A future which will be completed when the connection is opened and we received an CONNACK
      */
     @Override
-    public Future<MqttConnectResult> connect(String host, int port) {
+    public Promise<MqttConnectResult> connect(String host, int port) {
         return connect(host, port, false);
     }
 
-    private Future<MqttConnectResult> connect(String host, int port, boolean reconnect) {
+    private Promise<MqttConnectResult> connect(String host, int port, boolean reconnect) {
+        log.trace("[{}] Connecting to server, isReconnect - {}", channel != null ? channel.id() : "UNKNOWN", reconnect);
         if (this.eventLoop == null) {
             this.eventLoop = new NioEventLoopGroup();
         }
@@ -125,25 +154,31 @@ final class MqttClientImpl implements MqttClient {
         future.addListener((ChannelFutureListener) f -> {
             if (f.isSuccess()) {
                 MqttClientImpl.this.channel = f.channel();
+                log.debug("[{}][{}] Connected successfully {}!", host, port, this.channel.id());
                 MqttClientImpl.this.channel.closeFuture().addListener((ChannelFutureListener) channelFuture -> {
                     if (isConnected()) {
                         return;
                     }
+                    log.debug("[{}][{}] Channel is closed {}!", host, port, this.channel.id());
                     ChannelClosedException e = new ChannelClosedException("Channel is closed!");
                     if (callback != null) {
                         callback.connectionLost(e);
                     }
+                    pendingSubscriptions.forEach((id, mqttPendingSubscription) -> mqttPendingSubscription.onChannelClosed());
                     pendingSubscriptions.clear();
                     serverSubscriptions.clear();
                     subscriptions.clear();
+                    pendingServerUnsubscribes.forEach((id, mqttPendingServerUnsubscribes) -> mqttPendingServerUnsubscribes.onChannelClosed());
                     pendingServerUnsubscribes.clear();
                     qos2PendingIncomingPublishes.clear();
+                    pendingPublishes.forEach((id, mqttPendingPublish) -> mqttPendingPublish.onChannelClosed());
                     pendingPublishes.clear();
                     pendingSubscribeTopics.clear();
-                    handlerToSubscribtion.clear();
+                    handlerToSubscription.clear();
                     scheduleConnectIfRequired(host, port, true);
                 });
             } else {
+                log.debug("[{}][{}] Connect failed, trying reconnect!", host, port);
                 scheduleConnectIfRequired(host, port, reconnect);
             }
         });
@@ -151,6 +186,7 @@ final class MqttClientImpl implements MqttClient {
     }
 
     private void scheduleConnectIfRequired(String host, int port, boolean reconnect) {
+        log.trace("[{}] Scheduling connect to server, isReconnect - {}", channel != null ? channel.id() : "UNKNOWN", reconnect);
         if (clientConfig.isReconnect() && !disconnected) {
             if (reconnect) {
                 this.reconnect = true;
@@ -165,7 +201,8 @@ final class MqttClientImpl implements MqttClient {
     }
 
     @Override
-    public Future<MqttConnectResult> reconnect() {
+    public Promise<MqttConnectResult> reconnect() {
+        log.trace("[{}] Reconnecting to server, isReconnect - {}", channel != null ? channel.id() : "UNKNOWN", reconnect);
         if (host == null) {
             throw new IllegalStateException("Cannot reconnect. Call connect() first");
         }
@@ -192,6 +229,11 @@ final class MqttClientImpl implements MqttClient {
     @Override
     public void setEventLoop(EventLoopGroup eventLoop) {
         this.eventLoop = eventLoop;
+    }
+
+    @Override
+    public ListeningExecutor getHandlerExecutor() {
+        return this.handlerExecutor;
     }
 
     /**
@@ -256,12 +298,13 @@ final class MqttClientImpl implements MqttClient {
      */
     @Override
     public Future<Void> off(String topic, MqttHandler handler) {
+        log.trace("[{}] Unsubscribing from {}", channel != null ? channel.id() : "UNKNOWN", topic);
         Promise<Void> future = new DefaultPromise<>(this.eventLoop.next());
-        for (MqttSubscription subscription : this.handlerToSubscribtion.get(handler)) {
+        for (MqttSubscription subscription : this.handlerToSubscription.get(handler)) {
             this.subscriptions.remove(topic, subscription);
         }
-        this.handlerToSubscribtion.removeAll(handler);
-        this.checkSubscribtions(topic, future);
+        this.handlerToSubscription.removeAll(handler);
+        this.checkSubscriptions(topic, future);
         return future;
     }
 
@@ -274,15 +317,16 @@ final class MqttClientImpl implements MqttClient {
      */
     @Override
     public Future<Void> off(String topic) {
+        log.trace("[{}] Unsubscribing from {}", channel != null ? channel.id() : "UNKNOWN", topic);
         Promise<Void> future = new DefaultPromise<>(this.eventLoop.next());
         ImmutableSet<MqttSubscription> subscriptions = ImmutableSet.copyOf(this.subscriptions.get(topic));
         for (MqttSubscription subscription : subscriptions) {
-            for (MqttSubscription handSub : this.handlerToSubscribtion.get(subscription.getHandler())) {
+            for (MqttSubscription handSub : this.handlerToSubscription.get(subscription.getHandler())) {
                 this.subscriptions.remove(topic, handSub);
             }
-            this.handlerToSubscribtion.remove(subscription.getHandler(), subscription);
+            this.handlerToSubscription.remove(subscription.getHandler(), subscription);
         }
-        this.checkSubscribtions(topic, future);
+        this.checkSubscriptions(topic, future);
         return future;
     }
 
@@ -335,25 +379,35 @@ final class MqttClientImpl implements MqttClient {
      */
     @Override
     public Future<Void> publish(String topic, ByteBuf payload, MqttQoS qos, boolean retain) {
+        log.trace("[{}] Publishing message to {}", channel != null ? channel.id() : "UNKNOWN", topic);
         Promise<Void> future = new DefaultPromise<>(this.eventLoop.next());
         MqttFixedHeader fixedHeader = new MqttFixedHeader(MqttMessageType.PUBLISH, false, qos, retain, 0);
         MqttPublishVariableHeader variableHeader = new MqttPublishVariableHeader(topic, getNewMessageId().messageId());
         MqttPublishMessage message = new MqttPublishMessage(fixedHeader, variableHeader, payload);
-        MqttPendingPublish pendingPublish = new MqttPendingPublish(variableHeader.packetId(), future, payload.retain(), message, qos);
+        MqttPendingPublish pendingPublish = new MqttPendingPublish(variableHeader.packetId(), future,
+                payload.retain(), message, qos, () -> !pendingPublishes.containsKey(variableHeader.packetId()));
+        this.pendingPublishes.put(pendingPublish.getMessageId(), pendingPublish);
         ChannelFuture channelFuture = this.sendAndFlushPacket(message);
 
         if (channelFuture != null) {
-            pendingPublish.setSent(true);
-            if (channelFuture.cause() != null) {
-                future.setFailure(channelFuture.cause());
-                return future;
-            }
-        }
-        if (pendingPublish.isSent() && pendingPublish.getQos() == MqttQoS.AT_MOST_ONCE) {
-            pendingPublish.getFuture().setSuccess(null); //We don't get an ACK for QOS 0
-        } else if (pendingPublish.isSent()) {
-            this.pendingPublishes.put(pendingPublish.getMessageId(), pendingPublish);
-            pendingPublish.startPublishRetransmissionTimer(this.eventLoop.next(), this::sendAndFlushPacket);
+            channelFuture.addListener(result -> {
+                pendingPublish.setSent(true);
+                if (result.cause() != null) {
+                    pendingPublishes.remove(pendingPublish.getMessageId());
+                    future.setFailure(result.cause());
+                } else {
+                    if (pendingPublish.isSent() && pendingPublish.getQos() == MqttQoS.AT_MOST_ONCE) {
+                        pendingPublishes.remove(pendingPublish.getMessageId());
+                        pendingPublish.getFuture().setSuccess(null); //We don't get an ACK for QOS 0
+                    } else if (pendingPublish.isSent()) {
+                        pendingPublish.startPublishRetransmissionTimer(eventLoop.next(), MqttClientImpl.this::sendAndFlushPacket);
+                    } else {
+                        pendingPublishes.remove(pendingPublish.getMessageId());
+                    }
+                }
+            });
+        } else {
+            pendingPublishes.remove(pendingPublish.getMessageId());
         }
         return future;
     }
@@ -370,10 +424,16 @@ final class MqttClientImpl implements MqttClient {
 
     @Override
     public void disconnect() {
+        log.trace("[{}] Disconnecting from server", channel != null ? channel.id() : "UNKNOWN");
         disconnected = true;
         if (this.channel != null) {
             MqttMessage message = new MqttMessage(new MqttFixedHeader(MqttMessageType.DISCONNECT, false, MqttQoS.AT_MOST_ONCE, false, 0));
-            this.sendAndFlushPacket(message).addListener(future1 -> channel.close());
+            ChannelFuture channelFuture = this.sendAndFlushPacket(message);
+            eventLoop.schedule(() -> {
+                if (!channelFuture.isDone()) {
+                    this.channel.close();
+                }
+            }, 500, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -401,6 +461,7 @@ final class MqttClientImpl implements MqttClient {
             return null;
         }
         if (this.channel.isActive()) {
+            log.trace("[{}] Sending message {}", channel != null ? channel.id() : "UNKNOWN", message);
             return this.channel.writeAndFlush(message);
         }
         return this.channel.newFailedFuture(new ChannelClosedException("Channel is closed!"));
@@ -416,6 +477,7 @@ final class MqttClientImpl implements MqttClient {
     }
 
     private Future<Void> createSubscription(String topic, MqttHandler handler, boolean once, MqttQoS qos) {
+        log.trace("[{}] Creating subscription to {}", channel != null ? channel.id() : "UNKNOWN", topic);
         if (this.pendingSubscribeTopics.contains(topic)) {
             Optional<Map.Entry<Integer, MqttPendingSubscription>> subscriptionEntry = this.pendingSubscriptions.entrySet().stream().filter((e) -> e.getValue().getTopic().equals(topic)).findAny();
             if (subscriptionEntry.isPresent()) {
@@ -426,7 +488,7 @@ final class MqttClientImpl implements MqttClient {
         if (this.serverSubscriptions.contains(topic)) {
             MqttSubscription subscription = new MqttSubscription(topic, handler, once);
             this.subscriptions.put(topic, subscription);
-            this.handlerToSubscribtion.put(handler, subscription);
+            this.handlerToSubscription.put(handler, subscription);
             return this.channel.newSucceededFuture();
         }
 
@@ -437,7 +499,8 @@ final class MqttClientImpl implements MqttClient {
         MqttSubscribePayload payload = new MqttSubscribePayload(Collections.singletonList(subscription));
         MqttSubscribeMessage message = new MqttSubscribeMessage(fixedHeader, variableHeader, payload);
 
-        final MqttPendingSubscription pendingSubscription = new MqttPendingSubscription(future, topic, message);
+        final MqttPendingSubscription pendingSubscription = new MqttPendingSubscription(future, topic, message,
+                () -> !pendingSubscriptions.containsKey(variableHeader.messageId()));
         pendingSubscription.addHandler(handler, once);
         this.pendingSubscriptions.put(variableHeader.messageId(), pendingSubscription);
         this.pendingSubscribeTopics.add(topic);
@@ -448,14 +511,15 @@ final class MqttClientImpl implements MqttClient {
         return future;
     }
 
-    private void checkSubscribtions(String topic, Promise<Void> promise) {
+    private void checkSubscriptions(String topic, Promise<Void> promise) {
         if (!(this.subscriptions.containsKey(topic) && this.subscriptions.get(topic).size() != 0) && this.serverSubscriptions.contains(topic)) {
             MqttFixedHeader fixedHeader = new MqttFixedHeader(MqttMessageType.UNSUBSCRIBE, false, MqttQoS.AT_LEAST_ONCE, false, 0);
             MqttMessageIdVariableHeader variableHeader = getNewMessageId();
             MqttUnsubscribePayload payload = new MqttUnsubscribePayload(Collections.singletonList(topic));
             MqttUnsubscribeMessage message = new MqttUnsubscribeMessage(fixedHeader, variableHeader, payload);
 
-            MqttPendingUnsubscription pendingUnsubscription = new MqttPendingUnsubscription(promise, topic, message);
+            MqttPendingUnsubscription pendingUnsubscription = new MqttPendingUnsubscription(promise, topic, message,
+                    () -> !pendingServerUnsubscribes.containsKey(variableHeader.messageId()));
             this.pendingServerUnsubscribes.put(variableHeader.messageId(), pendingUnsubscription);
             pendingUnsubscription.startRetransmissionTimer(this.eventLoop.next(), this::sendAndFlushPacket);
 
@@ -465,7 +529,7 @@ final class MqttClientImpl implements MqttClient {
         }
     }
 
-    IntObjectHashMap<MqttPendingSubscription> getPendingSubscriptions() {
+    ConcurrentMap<Integer, MqttPendingSubscription> getPendingSubscriptions() {
         return pendingSubscriptions;
     }
 
@@ -477,23 +541,23 @@ final class MqttClientImpl implements MqttClient {
         return pendingSubscribeTopics;
     }
 
-    HashMultimap<MqttHandler, MqttSubscription> getHandlerToSubscribtion() {
-        return handlerToSubscribtion;
+    HashMultimap<MqttHandler, MqttSubscription> getHandlerToSubscription() {
+        return handlerToSubscription;
     }
 
     Set<String> getServerSubscriptions() {
         return serverSubscriptions;
     }
 
-    IntObjectHashMap<MqttPendingUnsubscription> getPendingServerUnsubscribes() {
+    ConcurrentMap<Integer, MqttPendingUnsubscription> getPendingServerUnsubscribes() {
         return pendingServerUnsubscribes;
     }
 
-    IntObjectHashMap<MqttPendingPublish> getPendingPublishes() {
+    ConcurrentMap<Integer, MqttPendingPublish> getPendingPublishes() {
         return pendingPublishes;
     }
 
-    IntObjectHashMap<MqttIncomingQos2Publish> getQos2PendingIncomingPublishes() {
+    ConcurrentMap<Integer, MqttIncomingQos2Publish> getQos2PendingIncomingPublishes() {
         return qos2PendingIncomingPublishes;
     }
 

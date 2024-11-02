@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,7 +14,16 @@
 /// limitations under the License.
 ///
 
-import { Component, Input, OnDestroy, OnInit, ViewChild, ViewContainerRef } from '@angular/core';
+import {
+  Component, HostBinding,
+  Injector,
+  Input,
+  OnDestroy,
+  OnInit,
+  StaticProvider,
+  ViewChild,
+  ViewContainerRef
+} from '@angular/core';
 import { TooltipPosition } from '@angular/material/tooltip';
 import { IAliasController } from '@core/api/widget-api.models';
 import { CdkOverlayOrigin, ConnectedPosition, Overlay, OverlayConfig, OverlayRef } from '@angular/cdk/overlay';
@@ -28,7 +37,7 @@ import {
   FiltersEditPanelComponent,
   FiltersEditPanelData
 } from '@home/components/filter/filters-edit-panel.component';
-import { ComponentPortal, PortalInjector } from '@angular/cdk/portal';
+import { ComponentPortal } from '@angular/cdk/portal';
 import { UserFilterDialogComponent, UserFilterDialogData } from '@home/components/filter/user-filter-dialog.component';
 import { MatDialog } from '@angular/material/dialog';
 
@@ -38,6 +47,9 @@ import { MatDialog } from '@angular/material/dialog';
   styleUrls: ['./filters-edit.component.scss']
 })
 export class FiltersEditComponent implements OnInit, OnDestroy {
+
+  @HostBinding('class')
+  filtersEditClass = 'tb-hide';
 
   aliasControllerValue: IAliasController;
 
@@ -107,7 +119,7 @@ export class FiltersEditComponent implements OnInit, OnDestroy {
     const filteredArray = Object.entries(this.filtersInfo);
 
     if (filteredArray.length === 1) {
-      const singleFilter: Filter = {id: filteredArray[0][0], ...filteredArray[0][1]};
+      const singleFilter: Filter = {id: filteredArray[0][0], ...deepClone(filteredArray[0][1])};
       this.dialog.open<UserFilterDialogComponent, UserFilterDialogData,
         Filter>(UserFilterDialogComponent, {
         disableClose: true,
@@ -153,23 +165,25 @@ export class FiltersEditComponent implements OnInit, OnDestroy {
     }
   }
 
-  private _createFiltersEditPanelInjector(overlayRef: OverlayRef, data: FiltersEditPanelData): PortalInjector {
-    const injectionTokens = new WeakMap<any, any>([
-      [FILTER_EDIT_PANEL_DATA, data],
-      [OverlayRef, overlayRef]
-    ]);
-    return new PortalInjector(this.viewContainerRef.injector, injectionTokens);
+  private _createFiltersEditPanelInjector(overlayRef: OverlayRef, data: FiltersEditPanelData): Injector {
+    const providers: StaticProvider[] = [
+      {provide: FILTER_EDIT_PANEL_DATA, useValue: data},
+      {provide: OverlayRef, useValue: overlayRef}
+    ];
+    return Injector.create({parent: this.viewContainerRef.injector, providers});
   }
 
   private updateFiltersInfo() {
     const allFilters = this.aliasController.getFilters();
     this.filtersInfo = {};
     this.hasEditableFilters = false;
+    this.filtersEditClass = 'tb-hide';
     for (const filterId of Object.keys(allFilters)) {
       const filterInfo = this.aliasController.getFilterInfo(filterId);
       if (filterInfo && isFilterEditable(filterInfo)) {
         this.filtersInfo[filterId] = deepClone(filterInfo);
         this.hasEditableFilters = true;
+        this.filtersEditClass = '';
       }
     }
   }

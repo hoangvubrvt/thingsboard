@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,18 +68,20 @@ public class BatchTbRuleEngineSubmitStrategy extends AbstractTbRuleEngineSubmitS
         int listSize = orderedMsgList.size();
         int startIdx = Math.min(packIdx.get() * batchSize, listSize);
         int endIdx = Math.min(startIdx + batchSize, listSize);
+        Map<UUID, TbProtoQueueMsg<TransportProtos.ToRuleEngineMsg>> tmpPack;
         synchronized (pendingPack) {
             pendingPack.clear();
             for (int i = startIdx; i < endIdx; i++) {
-                IdMsgPair pair = orderedMsgList.get(i);
+                IdMsgPair<TransportProtos.ToRuleEngineMsg> pair = orderedMsgList.get(i);
                 pendingPack.put(pair.uuid, pair.msg);
             }
+            tmpPack = new LinkedHashMap<>(pendingPack);
         }
         int submitSize = pendingPack.size();
         if (log.isDebugEnabled() && submitSize > 0) {
             log.debug("[{}] submitting [{}] messages to rule engine", queueName, submitSize);
         }
-        pendingPack.forEach(msgConsumer);
+        tmpPack.forEach(msgConsumer);
     }
 
 }

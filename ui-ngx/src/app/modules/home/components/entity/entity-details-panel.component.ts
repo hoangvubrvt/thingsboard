@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,13 +19,11 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
-  ComponentFactoryResolver,
   ComponentRef,
   EventEmitter,
   Injector,
   Input,
   OnDestroy,
-  OnInit,
   Output,
   QueryList,
   ViewChild,
@@ -35,16 +33,18 @@ import { PageComponent } from '@shared/components/page.component';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { EntityTableConfig } from '@home/models/entity/entities-table-config.models';
-import { BaseData, HasId } from '@shared/models/base-data';
+import { BaseData, HasId, hasIdEquals } from '@shared/models/base-data';
 import { EntityType, EntityTypeResource, EntityTypeTranslation } from '@shared/models/entity-type.models';
-import { FormGroup } from '@angular/forms';
+import { UntypedFormGroup } from '@angular/forms';
 import { EntityComponent } from './entity.component';
 import { TbAnchorComponent } from '@shared/components/tb-anchor.component';
 import { EntityAction } from '@home/models/entity/entity-component.models';
-import { Subscription } from 'rxjs';
+import { Observable, ReplaySubject, Subscription, throwError } from 'rxjs';
 import { MatTab, MatTabGroup } from '@angular/material/tabs';
 import { EntityTabsComponent } from '@home/components/entity/entity-tabs.component';
-import { deepClone } from '@core/utils';
+import { deepClone, mergeDeep } from '@core/utils';
+import { catchError } from 'rxjs/operators';
+import { HttpStatusCode } from '@angular/common/http';
 
 @Component({
   selector: 'tb-entity-details-panel',
@@ -52,7 +52,7 @@ import { deepClone } from '@core/utils';
   styleUrls: ['./entity-details-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class EntityDetailsPanelComponent extends PageComponent implements OnInit, AfterViewInit, OnDestroy {
+export class EntityDetailsPanelComponent extends PageComponent implements AfterViewInit, OnDestroy {
 
   @Output()
   closeEntityDetails = new EventEmitter<void>();
@@ -68,7 +68,7 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
 
   entityTabsComponentRef: ComponentRef<EntityTabsComponent<BaseData<HasId>>>;
   entityTabsComponent: EntityTabsComponent<BaseData<HasId>>;
-  detailsForm: FormGroup;
+  detailsForm: UntypedFormGroup;
 
   entitiesTableConfigValue: EntityTableConfig<BaseData<HasId>>;
   isEditValue = false;
@@ -89,23 +89,24 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
   entity: BaseData<HasId>;
   editingEntity: BaseData<HasId>;
 
-  private currentEntityId: HasId;
-  private subscriptions: Subscription[] = [];
-  private viewInited = false;
-  private pendingTabs: MatTab[];
+  protected currentEntityId: HasId;
+  protected subscriptions: Subscription[] = [];
+  protected viewInited = false;
+  protected pendingTabs: MatTab[];
 
   constructor(protected store: Store<AppState>,
-              private injector: Injector,
-              private cd: ChangeDetectorRef,
-              private componentFactoryResolver: ComponentFactoryResolver) {
+              protected injector: Injector,
+              protected cd: ChangeDetectorRef) {
     super(store);
   }
 
   @Input()
   set entityId(entityId: HasId) {
-    if (entityId && entityId !== this.currentEntityId) {
+    if (!hasIdEquals(entityId, this.currentEntityId)) {
       this.currentEntityId = entityId;
-      this.reload();
+      if (this.currentEntityId) {
+        this.reloadEntity();
+      }
     }
   }
 
@@ -140,11 +141,7 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
     return this.isEditValue;
   }
 
-  ngOnInit(): void {
-    this.init();
-  }
-
-  private init() {
+  protected init() {
     this.translations = this.entitiesTableConfig.entityTranslations;
     this.resources = this.entitiesTableConfig.entityResources;
     this.buildEntityComponent();
@@ -168,7 +165,6 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
       this.entityComponentRef.destroy();
       this.entityComponentRef = null;
     }
-    const componentFactory = this.componentFactoryResolver.resolveComponentFactory(this.entitiesTableConfig.entityComponent);
     const viewContainerRef = this.entityDetailsFormAnchor.viewContainerRef;
     viewContainerRef.clear();
     const injector: Injector = Injector.create(
@@ -186,7 +182,7 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
         parent: this.injector
       }
     );
-    this.entityComponentRef = viewContainerRef.createComponent(componentFactory, 0, injector);
+    this.entityComponentRef = viewContainerRef.createComponent(this.entitiesTableConfig.entityComponent, {index: 0, injector});
     this.entityComponent = this.entityComponentRef.instance;
     this.entityComponent.isEdit = this.isEdit;
     this.detailsForm = this.entityComponent.entityForm;
@@ -208,8 +204,7 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
     viewContainerRef.clear();
     this.entityTabsComponent = null;
     if (this.entitiesTableConfig.entityTabsComponent) {
-      const componentTabsFactory = this.componentFactoryResolver.resolveComponentFactory(this.entitiesTableConfig.entityTabsComponent);
-      this.entityTabsComponentRef = viewContainerRef.createComponent(componentTabsFactory);
+      this.entityTabsComponentRef = viewContainerRef.createComponent(this.entitiesTableConfig.entityTabsComponent);
       this.entityTabsComponent = this.entityTabsComponentRef.instance;
       this.entityTabsComponent.isEdit = this.isEdit;
       this.entityTabsComponent.entitiesTableConfig = this.entitiesTableConfig;
@@ -230,10 +225,11 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
   }
 
   hideDetailsTabs(): boolean {
-    return this.isEditValue && this.entitiesTableConfig.hideDetailsTabsOnEdit;
+    return !this.entityTabsComponent || this.isEditValue && this.entitiesTableConfig.hideDetailsTabsOnEdit;
   }
 
-  reload(): void {
+  reloadEntity(): Observable<BaseData<HasId>> {
+    const loadEntitySubject = new ReplaySubject<BaseData<HasId>>();
     this.isEdit = false;
     this.entitiesTableConfig.loadEntity(this.currentEntityId).subscribe(
       (entity) => {
@@ -242,8 +238,11 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
         if (this.entityTabsComponent) {
           this.entityTabsComponent.entity = entity;
         }
+        loadEntitySubject.next(entity);
+        loadEntitySubject.complete();
       }
     );
+    return loadEntitySubject;
   }
 
   onCloseEntityDetails() {
@@ -251,13 +250,14 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
   }
 
   onToggleEditMode(isEdit: boolean) {
-    this.isEdit = isEdit;
-    if (!this.isEdit) {
+    if (!isEdit) {
       this.entityComponent.entity = this.entity;
       if (this.entityTabsComponent) {
         this.entityTabsComponent.entity = this.entity;
       }
+      this.isEdit = isEdit;
     } else {
+      this.isEdit = isEdit;
       this.editingEntity = deepClone(this.entity);
       this.entityComponent.entity = this.editingEntity;
       if (this.entityTabsComponent) {
@@ -277,10 +277,24 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
     }
   }
 
-  saveEntity() {
+  saveEntity(emitEntityUpdated = true): Observable<BaseData<HasId>> {
+    const saveEntitySubject = new ReplaySubject<BaseData<HasId>>();
     if (this.detailsForm.valid) {
       const editingEntity = {...this.editingEntity, ...this.entityComponent.entityFormValue()};
-      this.entitiesTableConfig.saveEntity(editingEntity).subscribe(
+      if (this.editingEntity.hasOwnProperty('additionalInfo')) {
+        editingEntity.additionalInfo =
+          mergeDeep((this.editingEntity as any).additionalInfo, this.entityComponent.entityFormValue()?.additionalInfo);
+      }
+      this.entitiesTableConfig.saveEntity(editingEntity, this.editingEntity)
+        .pipe(
+          catchError((err) => {
+           if (err.status === HttpStatusCode.Conflict) {
+             return this.entitiesTableConfig.loadEntity(this.currentEntityId);
+           }
+           return throwError(() => err);
+          })
+        )
+        .subscribe(
         (entity) => {
           this.entity = entity;
           this.entityComponent.entity = entity;
@@ -288,10 +302,18 @@ export class EntityDetailsPanelComponent extends PageComponent implements OnInit
             this.entityTabsComponent.entity = entity;
           }
           this.isEdit = false;
-          this.entityUpdated.emit(this.entity);
+          if (emitEntityUpdated) {
+            this.entityUpdated.emit(this.entity);
+          }
+          saveEntitySubject.next(entity);
+          saveEntitySubject.complete();
         }
       );
+    } else {
+      saveEntitySubject.next(null);
+      saveEntitySubject.complete();
     }
+    return saveEntitySubject;
   }
 
   ngAfterViewInit(): void {

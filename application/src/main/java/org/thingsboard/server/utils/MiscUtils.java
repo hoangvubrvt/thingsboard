@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package org.thingsboard.server.utils;
 
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
+import jakarta.servlet.http.HttpServletRequest;
 
-import javax.servlet.http.HttpServletRequest;
 import java.nio.charset.Charset;
 
 
@@ -33,6 +33,7 @@ public class MiscUtils {
         return "The " + propertyName + " property need to be set!";
     }
 
+    @SuppressWarnings("deprecation")
     public static HashFunction forName(String name) {
         switch (name) {
             case "murmur3_32":
@@ -49,12 +50,43 @@ public class MiscUtils {
     }
 
     public static String constructBaseUrl(HttpServletRequest request) {
-        String scheme = request.getScheme();
+        return String.format("%s://%s:%d",
+                getScheme(request),
+                getDomainName(request),
+                getPort(request));
+    }
 
+    public static String getScheme(HttpServletRequest request){
+        String scheme = request.getScheme();
         String forwardedProto = request.getHeader("x-forwarded-proto");
         if (forwardedProto != null) {
             scheme = forwardedProto;
         }
+        return scheme;
+    }
+
+    public static String getDomainName(HttpServletRequest request){
+        return request.getServerName();
+    }
+
+    public static String getDomainNameAndPort(HttpServletRequest request){
+        String domainName = getDomainName(request);
+        String scheme = getScheme(request);
+        int port = MiscUtils.getPort(request);
+        if (needsPort(scheme, port)) {
+            domainName += ":" + port;
+        }
+        return domainName;
+    }
+
+    private static boolean needsPort(String scheme, int port) {
+        boolean isHttpDefault = "http".equals(scheme.toLowerCase()) && port == 80;
+        boolean isHttpsDefault = "https".equals(scheme.toLowerCase()) && port == 443;
+        return !isHttpDefault && !isHttpsDefault;
+    }
+
+    public static int getPort(HttpServletRequest request){
+        String forwardedProto = request.getHeader("x-forwarded-proto");
 
         int serverPort = request.getServerPort();
         if (request.getHeader("x-forwarded-port") != null) {
@@ -72,11 +104,6 @@ public class MiscUtils {
                     break;
             }
         }
-
-        String baseUrl = String.format("%s://%s:%d",
-                scheme,
-                request.getServerName(),
-                serverPort);
-        return baseUrl;
+        return serverPort;
     }
 }

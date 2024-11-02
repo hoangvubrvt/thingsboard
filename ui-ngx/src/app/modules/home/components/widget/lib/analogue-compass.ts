@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -17,24 +17,17 @@
 import { WidgetContext } from '@home/models/widget-component.models';
 import * as CanvasGauges from 'canvas-gauges';
 import {
-  AnalogueCompassSettings,
-  analogueCompassSettingsSchema
+  AnalogueCompassSettings
 } from '@home/components/widget/lib/analogue-compass.models';
 import { deepClone, isDefined } from '@core/utils';
-import { JsonSettingsSchema } from '@shared/models/widget.models';
 import { getFontFamily } from '@home/components/widget/lib/settings.models';
 import { TbBaseGauge } from '@home/components/widget/lib/analogue-gauge.models';
 import RadialGaugeOptions = CanvasGauges.RadialGaugeOptions;
 import BaseGauge = CanvasGauges.BaseGauge;
 import RadialGauge = CanvasGauges.RadialGauge;
 
-const analogueCompassSettingsSchemaValue = analogueCompassSettingsSchema;
-
+// @dynamic
 export class TbAnalogueCompass extends TbBaseGauge<AnalogueCompassSettings, RadialGaugeOptions> {
-
-  static get settingsSchema(): JsonSettingsSchema {
-    return analogueCompassSettingsSchemaValue;
-  }
 
   constructor(ctx: WidgetContext, canvasId: string) {
     super(ctx, canvasId);
@@ -43,7 +36,7 @@ export class TbAnalogueCompass extends TbBaseGauge<AnalogueCompassSettings, Radi
   protected createGaugeOptions(gaugeElement: HTMLElement, settings: AnalogueCompassSettings): RadialGaugeOptions {
 
     const majorTicks = (settings.majorTicks && settings.majorTicks.length > 0) ? deepClone(settings.majorTicks) :
-      ['N','NE','E','SE','S','SW','W','NW'];
+      ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     majorTicks.push(majorTicks[0]);
 
     return {

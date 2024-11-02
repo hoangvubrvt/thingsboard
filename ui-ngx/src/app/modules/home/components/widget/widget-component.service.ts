@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 /// limitations under the License.
 ///
 
-import { Inject, Injectable, Type } from '@angular/core';
+import { Inject, Injectable, Optional, Type } from '@angular/core';
 import { DynamicComponentFactoryService } from '@core/services/dynamic-component-factory.service';
 import { WidgetService } from '@core/http/widget.service';
-import { forkJoin, Observable, of, ReplaySubject, Subject, throwError } from 'rxjs';
+import { forkJoin, from, Observable, of, ReplaySubject, Subject, throwError } from 'rxjs';
 import {
   ErrorWidgetType,
   MissingWidgetType,
@@ -28,9 +28,21 @@ import {
 } from '@home/models/widget-component.models';
 import cssjs from '@core/css/css';
 import { UtilsService } from '@core/services/utils.service';
-import { ResourcesService } from '@core/services/resources.service';
-import { Widget, widgetActionSources, WidgetControllerDescriptor, WidgetType } from '@shared/models/widget.models';
-import { catchError, map, mergeMap, switchMap } from 'rxjs/operators';
+import {
+  componentTypeBySelector,
+  flatModulesWithComponents,
+  ModulesWithComponents,
+  modulesWithComponentsToTypes,
+  ResourcesService
+} from '@core/services/resources.service';
+import {
+  IWidgetSettingsComponent,
+  Widget,
+  widgetActionSources,
+  WidgetControllerDescriptor,
+  WidgetType
+} from '@shared/models/widget.models';
+import { catchError, map, mergeMap, switchMap, tap } from 'rxjs/operators';
 import { isFunction, isUndefined } from '@core/utils';
 import { TranslateService } from '@ngx-translate/core';
 import { DynamicWidgetComponent } from '@home/components/widget/dynamic-widget.component';
@@ -41,51 +53,19 @@ import { NULL_UUID } from '@shared/models/id/has-uuid';
 import { WidgetTypeId } from '@app/shared/models/id/widget-type-id';
 import { TenantId } from '@app/shared/models/id/tenant-id';
 import { SharedModule } from '@shared/shared.module';
-import * as AngularCore from '@angular/core';
-import * as AngularCommon from '@angular/common';
-import * as AngularForms from '@angular/forms';
-import * as AngularRouter from '@angular/router';
-import * as AngularCdkKeycodes from '@angular/cdk/keycodes';
-import * as AngularCdkCoercion from '@angular/cdk/coercion';
-import * as AngularMaterialChips from '@angular/material/chips';
-import * as AngularMaterialAutocomplete from '@angular/material/autocomplete';
-import * as AngularMaterialDialog from '@angular/material/dialog';
-import * as NgrxStore from '@ngrx/store';
-import * as RxJs from 'rxjs';
-import * as RxJsOperators from 'rxjs/operators';
-import * as TranslateCore from '@ngx-translate/core';
-import * as TbCore from '@core/public-api';
-import * as TbShared from '@shared/public-api';
-import * as _moment from 'moment';
+import { MODULES_MAP } from '@shared/public-api';
+import tinycolor from 'tinycolor2';
+import moment from 'moment';
+import { IModulesMap } from '@modules/common/modules-map.models';
+import { HOME_COMPONENTS_MODULE_TOKEN } from '@home/components/tokens';
+import { widgetSettingsComponentsMap } from '@home/components/widget/lib/settings/widget-settings.module';
+import { basicWidgetConfigComponentsMap } from '@home/components/widget/config/basic/basic-widget-config.module';
+import { IBasicWidgetConfigComponent } from '@home/components/widget/config/widget-config.component.models';
 
-declare const SystemJS;
-
-const widgetResourcesModulesMap = {
-  '@angular/core': SystemJS.newModule(AngularCore),
-  '@angular/common': SystemJS.newModule(AngularCommon),
-  '@angular/forms': SystemJS.newModule(AngularForms),
-  '@angular/router': SystemJS.newModule(AngularRouter),
-  '@angular/cdk/keycodes': SystemJS.newModule(AngularCdkKeycodes),
-  '@angular/cdk/coercion': SystemJS.newModule(AngularCdkCoercion),
-  '@angular/material/chips': SystemJS.newModule(AngularMaterialChips),
-  '@angular/material/autocomplete': SystemJS.newModule(AngularMaterialAutocomplete),
-  '@angular/material/dialog': SystemJS.newModule(AngularMaterialDialog),
-  '@ngrx/store': SystemJS.newModule(NgrxStore),
-  rxjs: SystemJS.newModule(RxJs),
-  'rxjs/operators': SystemJS.newModule(RxJsOperators),
-  '@ngx-translate/core': SystemJS.newModule(TranslateCore),
-  '@core/public-api': SystemJS.newModule(TbCore),
-  '@shared/public-api': SystemJS.newModule(TbShared),
-  moment: SystemJS.newModule(_moment)
-};
-
-// @dynamic
 @Injectable()
 export class WidgetComponentService {
 
   private cssParser = new cssjs();
-
-  private widgetsInfoInMemoryCache = new Map<string, WidgetInfo>();
 
   private widgetsInfoFetchQueue = new Map<string, Array<Subject<WidgetInfo>>>();
 
@@ -96,6 +76,8 @@ export class WidgetComponentService {
   private editingWidgetType: WidgetType;
 
   constructor(@Inject(WINDOW) private window: Window,
+              @Optional() @Inject(MODULES_MAP) private modulesMap: IModulesMap,
+              @Inject(HOME_COMPONENTS_MODULE_TOKEN) private homeComponentsModule: Type<any>,
               private dynamicComponentFactoryService: DynamicComponentFactoryService,
               private widgetService: WidgetService,
               private utils: UtilsService,
@@ -103,14 +85,6 @@ export class WidgetComponentService {
               private translate: TranslateService) {
 
     this.cssParser.testMode = false;
-
-    this.widgetService.onWidgetTypeUpdated().subscribe((widgetType) => {
-      this.deleteWidgetInfoFromCache(widgetType.bundleAlias, widgetType.alias, widgetType.tenantId.id === NULL_UUID);
-    });
-
-    this.widgetService.onWidgetBundleDeleted().subscribe((widgetsBundle) => {
-      this.deleteWidgetsBundleFromCache(widgetsBundle.alias, widgetsBundle.tenantId.id === NULL_UUID);
-    });
 
     this.init();
   }
@@ -125,7 +99,9 @@ export class WidgetComponentService {
         this.editingWidgetType = toWidgetType(
           {
             widgetName: this.utils.editWidgetInfo.widgetName,
-            alias: 'customWidget',
+            fullFqn: 'system.customWidget',
+            deprecated: false,
+            scada: false,
             type: this.utils.editWidgetInfo.type,
             sizeX: this.utils.editWidgetInfo.sizeX,
             sizeY: this.utils.editWidgetInfo.sizeY,
@@ -135,26 +111,119 @@ export class WidgetComponentService {
             controllerScript: this.utils.editWidgetInfo.controllerScript,
             settingsSchema: this.utils.editWidgetInfo.settingsSchema,
             dataKeySettingsSchema: this.utils.editWidgetInfo.dataKeySettingsSchema,
+            latestDataKeySettingsSchema: this.utils.editWidgetInfo.latestDataKeySettingsSchema,
+            settingsDirective: this.utils.editWidgetInfo.settingsDirective,
+            dataKeySettingsDirective: this.utils.editWidgetInfo.dataKeySettingsDirective,
+            latestDataKeySettingsDirective: this.utils.editWidgetInfo.latestDataKeySettingsDirective,
+            hasBasicMode: this.utils.editWidgetInfo.hasBasicMode,
+            basicModeDirective: this.utils.editWidgetInfo.basicModeDirective,
             defaultConfig: this.utils.editWidgetInfo.defaultConfig
-          }, new WidgetTypeId('1'), new TenantId( NULL_UUID ), 'customWidgetBundle'
+          }, new WidgetTypeId('1'), new TenantId( NULL_UUID ), undefined, undefined
         );
       }
-      const initSubject = new ReplaySubject();
+      const initSubject = new ReplaySubject<void>();
       this.init$ = initSubject.asObservable();
-      const loadDefaultWidgetInfoTasks = [
-        this.loadWidgetResources(this.missingWidgetType, 'global-widget-missing-type', [SharedModule, WidgetComponentsModule]),
-        this.loadWidgetResources(this.errorWidgetType, 'global-widget-error-type', [SharedModule, WidgetComponentsModule]),
-      ];
-      forkJoin(loadDefaultWidgetInfoTasks).subscribe(
+
+      const w = (this.window as any);
+
+      w.tinycolor = tinycolor;
+      w.cssjs = cssjs;
+      w.moment = moment;
+
+      const widgetModulesTasks: Observable<any>[] = [];
+      widgetModulesTasks.push(from(import('jquery.terminal')).pipe(
+        tap((mod) => {
+          mod.default(window, $);
+        })
+      ));
+
+      widgetModulesTasks.push(from(import('flot/src/jquery.flot.js')).pipe(
+        mergeMap(() => {
+          const flotJsPluginsTasks: Observable<any>[] = [];
+          flotJsPluginsTasks.push(from(import('flot/lib/jquery.colorhelpers.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.time.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.selection.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.pie.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.crosshair.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.stack.js')));
+          flotJsPluginsTasks.push(from(import('flot/src/plugins/jquery.flot.symbol.js')));
+          flotJsPluginsTasks.push(from(import('flot.curvedlines/curvedLines.js')));
+          return forkJoin(flotJsPluginsTasks);
+        })
+      ));
+
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/flot-widget')).pipe(
+        tap((mod) => {
+          (window as any).TbFlot = mod.TbFlot;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/chart/time-series-chart')).pipe(
+        tap((mod) => {
+          (window as any).TbTimeSeriesChart = mod.TbTimeSeriesChart;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/analogue-compass')).pipe(
+        tap((mod) => {
+          (window as any).TbAnalogueCompass = mod.TbAnalogueCompass;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/analogue-radial-gauge')).pipe(
+        tap((mod) => {
+          (window as any).TbAnalogueRadialGauge = mod.TbAnalogueRadialGauge;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/analogue-linear-gauge')).pipe(
+        tap((mod) => {
+          (window as any).TbAnalogueLinearGauge = mod.TbAnalogueLinearGauge;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/digital-gauge')).pipe(
+        tap((mod) => {
+          (window as any).TbCanvasDigitalGauge = mod.TbCanvasDigitalGauge;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/maps/map-widget2')).pipe(
+        tap((mod) => {
+          (window as any).TbMapWidgetV2 = mod.TbMapWidgetV2;
+        }))
+      );
+      widgetModulesTasks.push(from(import('@home/components/widget/lib/trip-animation/trip-animation.component')).pipe(
+        tap((mod) => {
+          (window as any).TbTripAnimationWidget = mod.TbTripAnimationWidget;
+        }))
+      );
+
+      forkJoin(widgetModulesTasks).subscribe(
         () => {
-          initSubject.next();
+          const loadDefaultWidgetInfoTasks = [
+            this.loadWidgetResources(this.missingWidgetType, 'global-widget-missing-type',
+              [SharedModule, WidgetComponentsModule, this.homeComponentsModule]),
+            this.loadWidgetResources(this.errorWidgetType, 'global-widget-error-type',
+              [SharedModule, WidgetComponentsModule, this.homeComponentsModule]),
+          ];
+          forkJoin(loadDefaultWidgetInfoTasks).subscribe(
+            () => {
+              initSubject.next();
+            },
+            (e) => {
+              let errorMessages = ['Failed to load default widget types!'];
+              if (e && e.length) {
+                errorMessages = errorMessages.concat(e);
+              }
+              console.error('Failed to load default widget types!');
+              initSubject.error({
+                widgetInfo: this.errorWidgetType,
+                errorMessages
+              });
+            }
+          );
         },
         (e) => {
-          let errorMessages = ['Failed to load default widget types!'];
+          let errorMessages = ['Failed to load widget modules!'];
           if (e && e.length) {
             errorMessages = errorMessages.concat(e);
           }
-          console.error('Failed to load default widget types!');
+          console.error('Failed to load widget modules!');
           initSubject.error({
             widgetInfo: this.errorWidgetType,
             errorMessages
@@ -166,7 +235,7 @@ export class WidgetComponentService {
   }
 
   public getInstantWidgetInfo(widget: Widget): WidgetInfo {
-    const widgetInfo = this.getWidgetInfoFromCache(widget.bundleAlias, widget.typeAlias, widget.isSystemType);
+    const widgetInfo = this.widgetService.getWidgetInfoFromCache(widget.typeFullFqn);
     if (widgetInfo) {
       return widgetInfo;
     } else {
@@ -174,37 +243,41 @@ export class WidgetComponentService {
     }
   }
 
-  public getWidgetInfo(bundleAlias: string, widgetTypeAlias: string, isSystem: boolean): Observable<WidgetInfo> {
+  public getWidgetInfo(fullFqn: string): Observable<WidgetInfo> {
     return this.init().pipe(
-      mergeMap(() => this.getWidgetInfoInternal(bundleAlias, widgetTypeAlias, isSystem))
+      mergeMap(() => this.getWidgetInfoInternal(fullFqn))
     );
   }
 
-  private getWidgetInfoInternal(bundleAlias: string, widgetTypeAlias: string, isSystem: boolean): Observable<WidgetInfo> {
+  public clearWidgetInfo(widgetInfo: WidgetInfo): void {
+    this.dynamicComponentFactoryService.destroyDynamicComponent(widgetInfo.componentType);
+    this.widgetService.deleteWidgetInfoFromCache(widgetInfo.fullFqn);
+  }
+
+  private getWidgetInfoInternal(fullFqn: string): Observable<WidgetInfo> {
     const widgetInfoSubject = new ReplaySubject<WidgetInfo>();
-    const widgetInfo = this.getWidgetInfoFromCache(bundleAlias, widgetTypeAlias, isSystem);
+    const widgetInfo = this.widgetService.getWidgetInfoFromCache(fullFqn);
     if (widgetInfo) {
       widgetInfoSubject.next(widgetInfo);
       widgetInfoSubject.complete();
     } else {
       if (this.utils.widgetEditMode) {
-        this.loadWidget(this.editingWidgetType, bundleAlias, isSystem, widgetInfoSubject);
+        this.loadWidget(this.editingWidgetType, widgetInfoSubject);
       } else {
-        const key = this.createWidgetInfoCacheKey(bundleAlias, widgetTypeAlias, isSystem);
-        let fetchQueue = this.widgetsInfoFetchQueue.get(key);
+        let fetchQueue = this.widgetsInfoFetchQueue.get(fullFqn);
         if (fetchQueue) {
           fetchQueue.push(widgetInfoSubject);
         } else {
           fetchQueue = new Array<Subject<WidgetInfo>>();
-          this.widgetsInfoFetchQueue.set(key, fetchQueue);
-          this.widgetService.getWidgetType(bundleAlias, widgetTypeAlias, isSystem, {ignoreErrors: true}).subscribe(
+          this.widgetsInfoFetchQueue.set(fullFqn, fetchQueue);
+          this.widgetService.getWidgetType(fullFqn, {ignoreErrors: true}).subscribe(
             (widgetType) => {
-              this.loadWidget(widgetType, bundleAlias, isSystem, widgetInfoSubject);
+              this.loadWidget(widgetType, widgetInfoSubject);
             },
             () => {
               widgetInfoSubject.next(this.missingWidgetType);
               widgetInfoSubject.complete();
-              this.resolveWidgetsInfoFetchQueue(key, this.missingWidgetType);
+              this.resolveWidgetsInfoFetchQueue(fullFqn, this.missingWidgetType);
             }
           );
         }
@@ -213,20 +286,19 @@ export class WidgetComponentService {
     return widgetInfoSubject.asObservable();
   }
 
-  private loadWidget(widgetType: WidgetType, bundleAlias: string, isSystem: boolean, widgetInfoSubject: Subject<WidgetInfo>) {
+  private loadWidget(widgetType: WidgetType, widgetInfoSubject: Subject<WidgetInfo>) {
     const widgetInfo = toWidgetInfo(widgetType);
-    const key = this.createWidgetInfoCacheKey(bundleAlias, widgetInfo.alias, isSystem);
     let widgetControllerDescriptor: WidgetControllerDescriptor = null;
     try {
-      widgetControllerDescriptor = this.createWidgetControllerDescriptor(widgetInfo, key);
+      widgetControllerDescriptor = this.createWidgetControllerDescriptor(widgetInfo);
     } catch (e) {
       const details = this.utils.parseException(e);
       const errorMessage = `Failed to compile widget script. \n Error: ${details.message}`;
-      this.processWidgetLoadError([errorMessage], key, widgetInfoSubject);
+      this.processWidgetLoadError([errorMessage], widgetInfo.fullFqn, widgetInfoSubject);
     }
     if (widgetControllerDescriptor) {
-      const widgetNamespace = `widget-type-${(isSystem ? 'sys-' : '')}${bundleAlias}-${widgetInfo.alias}`;
-      this.loadWidgetResources(widgetInfo, widgetNamespace, [SharedModule, WidgetComponentsModule]).subscribe(
+      const widgetNamespace = `widget-type-${widgetInfo.fullFqn.replace(/\./g, '-')}`;
+      this.loadWidgetResources(widgetInfo, widgetNamespace, [SharedModule, WidgetComponentsModule, this.homeComponentsModule]).subscribe(
         () => {
           if (widgetControllerDescriptor.settingsSchema) {
             widgetInfo.typeSettingsSchema = widgetControllerDescriptor.settingsSchema;
@@ -234,18 +306,21 @@ export class WidgetComponentService {
           if (widgetControllerDescriptor.dataKeySettingsSchema) {
             widgetInfo.typeDataKeySettingsSchema = widgetControllerDescriptor.dataKeySettingsSchema;
           }
+          if (widgetControllerDescriptor.latestDataKeySettingsSchema) {
+            widgetInfo.typeLatestDataKeySettingsSchema = widgetControllerDescriptor.latestDataKeySettingsSchema;
+          }
           widgetInfo.typeParameters = widgetControllerDescriptor.typeParameters;
           widgetInfo.actionSources = widgetControllerDescriptor.actionSources;
           widgetInfo.widgetTypeFunction = widgetControllerDescriptor.widgetTypeFunction;
-          this.putWidgetInfoToCache(widgetInfo, bundleAlias, widgetInfo.alias, isSystem);
+          this.widgetService.putWidgetInfoToCache(widgetInfo);
           if (widgetInfoSubject) {
             widgetInfoSubject.next(widgetInfo);
             widgetInfoSubject.complete();
           }
-          this.resolveWidgetsInfoFetchQueue(key, widgetInfo);
+          this.resolveWidgetsInfoFetchQueue(widgetInfo.fullFqn, widgetInfo);
         },
         (errorMessages: string[]) => {
-          this.processWidgetLoadError(errorMessages, key, widgetInfoSubject);
+          this.processWidgetLoadError(errorMessages, widgetInfo.fullFqn, widgetInfoSubject);
         }
       );
     }
@@ -255,12 +330,12 @@ export class WidgetComponentService {
     this.cssParser.cssPreviewNamespace = widgetNamespace;
     this.cssParser.createStyleElement(widgetNamespace, widgetInfo.templateCss);
     const resourceTasks: Observable<string>[] = [];
-    const modulesTasks: Observable<Type<any>[] | string>[] = [];
+    const modulesTasks: Observable<ModulesWithComponents | string>[] = [];
     if (widgetInfo.resources.length > 0) {
       widgetInfo.resources.filter(r => r.isModule).forEach(
         (resource) => {
           modulesTasks.push(
-            this.resources.loadModules(resource.url, widgetResourcesModulesMap).pipe(
+            this.resources.loadModulesWithComponents(resource.url, this.modulesMap).pipe(
               catchError((e: Error) => of(e?.message ? e.message : `Failed to load widget resource module: '${resource.url}'`))
             )
           );
@@ -271,13 +346,13 @@ export class WidgetComponentService {
       (resource) => {
         resourceTasks.push(
           this.resources.loadResource(resource.url).pipe(
-            catchError(e => of(`Failed to load widget resource: '${resource.url}'`))
+            catchError(() => of(`Failed to load widget resource: '${resource.url}'`))
           )
         );
       }
     );
 
-    let modulesObservable: Observable<string | Type<any>[]>;
+    let modulesObservable: Observable<string | ModulesWithComponents>;
     if (modulesTasks.length) {
       modulesObservable = forkJoin(modulesTasks).pipe(
         map(res => {
@@ -285,16 +360,13 @@ export class WidgetComponentService {
           if (msg) {
             return msg as string;
           } else {
-            let resModules = (res as Type<any>[][]).flat();
-            if (modules && modules.length) {
-              resModules = resModules.concat(modules);
-            }
-            return resModules;
+            const modulesWithComponentsList = res as ModulesWithComponents[];
+            return flatModulesWithComponents(modulesWithComponentsList);
           }
         })
       );
     } else {
-      modulesObservable = modules && modules.length ? of(modules) : of([]);
+      modulesObservable = of({modules: [], standaloneComponents: []});
     }
 
     resourceTasks.push(
@@ -303,13 +375,18 @@ export class WidgetComponentService {
           if (typeof resolvedModules === 'string') {
             return of(resolvedModules);
           } else {
-            return this.dynamicComponentFactoryService.createDynamicComponentFactory(
+            this.registerWidgetSettingsForms(widgetInfo, resolvedModules);
+            let imports = modulesWithComponentsToTypes(resolvedModules);
+            if (modules && modules.length) {
+              imports = imports.concat(modules);
+            }
+            return this.dynamicComponentFactoryService.createDynamicComponent(
               class DynamicWidgetComponentInstance extends DynamicWidgetComponent {},
               widgetInfo.templateHtml,
-              resolvedModules
+              imports
             ).pipe(
-              map((factory) => {
-                widgetInfo.componentFactory = factory;
+              map((componentType) => {
+                widgetInfo.componentType = componentType;
                 return null;
               }),
               catchError(e => {
@@ -317,7 +394,7 @@ export class WidgetComponentService {
                 const errorMessage = `Failed to compile widget html. \n Error: ${details.message}`;
                 return of(errorMessage);
               })
-            )
+            );
           }
         }))
     );
@@ -328,7 +405,7 @@ export class WidgetComponentService {
             errors = msgs.filter(msg => msg && msg.length > 0);
           }
           if (errors && errors.length) {
-            return throwError(errors);
+            return throwError(() => errors);
           } else {
             return of(null);
           }
@@ -336,8 +413,40 @@ export class WidgetComponentService {
     ));
   }
 
-  private createWidgetControllerDescriptor(widgetInfo: WidgetInfo, name: string): WidgetControllerDescriptor {
-    let widgetTypeFunctionBody = `return function ${name} (ctx) {\n` +
+  private registerWidgetSettingsForms(widgetInfo: WidgetInfo, modulesWithComponents: ModulesWithComponents) {
+    const directives: string[] = [];
+    const basicDirectives: string[] = [];
+    if (widgetInfo.settingsDirective && widgetInfo.settingsDirective.length) {
+      directives.push(widgetInfo.settingsDirective);
+    }
+    if (widgetInfo.dataKeySettingsDirective && widgetInfo.dataKeySettingsDirective.length) {
+      directives.push(widgetInfo.dataKeySettingsDirective);
+    }
+    if (widgetInfo.latestDataKeySettingsDirective && widgetInfo.latestDataKeySettingsDirective.length) {
+      directives.push(widgetInfo.latestDataKeySettingsDirective);
+    }
+    if (widgetInfo.basicModeDirective && widgetInfo.basicModeDirective.length) {
+      basicDirectives.push(widgetInfo.basicModeDirective);
+    }
+
+    this.expandSettingComponentMap(widgetSettingsComponentsMap, directives, modulesWithComponents);
+    this.expandSettingComponentMap(basicWidgetConfigComponentsMap, basicDirectives, modulesWithComponents);
+  }
+
+  private expandSettingComponentMap(settingsComponentsMap: {[key: string]: Type<IWidgetSettingsComponent | IBasicWidgetConfigComponent>},
+                                    directives: string[], modulesWithComponents: ModulesWithComponents): void {
+    if (directives.length) {
+      directives.forEach(selector => {
+        const compType = componentTypeBySelector(modulesWithComponents, selector);
+        if (compType) {
+          settingsComponentsMap[selector] = compType;
+        }
+      });
+    }
+  }
+
+  private createWidgetControllerDescriptor(widgetInfo: WidgetInfo): WidgetControllerDescriptor {
+    let widgetTypeFunctionBody = `return function _${widgetInfo.fullFqn.replace(/\./g, '_')} (ctx) {\n` +
       '    var self = this;\n' +
       '    self.ctx = ctx;\n\n'; /*+
 
@@ -413,6 +522,9 @@ export class WidgetComponentService {
       if (isFunction(widgetTypeInstance.getDataKeySettingsSchema)) {
         result.dataKeySettingsSchema = widgetTypeInstance.getDataKeySettingsSchema();
       }
+      if (isFunction(widgetTypeInstance.getLatestDataKeySettingsSchema)) {
+        result.latestDataKeySettingsSchema = widgetTypeInstance.getLatestDataKeySettingsSchema();
+      }
       if (isFunction(widgetTypeInstance.typeParameters)) {
         result.typeParameters = widgetTypeInstance.typeParameters();
       } else {
@@ -435,14 +547,56 @@ export class WidgetComponentService {
       if (isUndefined(result.typeParameters.singleEntity)) {
         result.typeParameters.singleEntity = false;
       }
+      if (isUndefined(result.typeParameters.hasAdditionalLatestDataKeys)) {
+        result.typeParameters.hasAdditionalLatestDataKeys = false;
+      }
       if (isUndefined(result.typeParameters.warnOnPageDataOverflow)) {
         result.typeParameters.warnOnPageDataOverflow = true;
+      }
+      if (isUndefined(result.typeParameters.ignoreDataUpdateOnIntervalTick)) {
+        result.typeParameters.ignoreDataUpdateOnIntervalTick = false;
       }
       if (isUndefined(result.typeParameters.dataKeysOptional)) {
         result.typeParameters.dataKeysOptional = false;
       }
+      if (isUndefined(result.typeParameters.datasourcesOptional)) {
+        result.typeParameters.datasourcesOptional = false;
+      }
       if (isUndefined(result.typeParameters.stateData)) {
         result.typeParameters.stateData = false;
+      }
+      if (isUndefined(result.typeParameters.processNoDataByWidget)) {
+        result.typeParameters.processNoDataByWidget = false;
+      }
+      if (isUndefined(result.typeParameters.previewWidth)) {
+        result.typeParameters.previewWidth = '100%';
+      }
+      if (isUndefined(result.typeParameters.previewHeight)) {
+        result.typeParameters.previewHeight = '70%';
+      }
+      if (isUndefined(result.typeParameters.embedTitlePanel)) {
+        result.typeParameters.embedTitlePanel = false;
+      }
+      if (isUndefined(result.typeParameters.overflowVisible)) {
+        result.typeParameters.overflowVisible = false;
+      }
+      if (isUndefined(result.typeParameters.hideDataSettings)) {
+        result.typeParameters.hideDataSettings = false;
+      }
+      if (!isFunction(result.typeParameters.defaultDataKeysFunction)) {
+        result.typeParameters.defaultDataKeysFunction = null;
+      }
+      if (!isFunction(result.typeParameters.defaultLatestDataKeysFunction)) {
+        result.typeParameters.defaultLatestDataKeysFunction = null;
+      }
+      if (!isFunction(result.typeParameters.dataKeySettingsFunction)) {
+        result.typeParameters.dataKeySettingsFunction = null;
+      }
+      if (isUndefined(result.typeParameters.displayRpcMessageToast)) {
+        result.typeParameters.displayRpcMessageToast = true;
+      }
+      if (isUndefined(result.typeParameters.targetDeviceOptional)) {
+        result.typeParameters.targetDeviceOptional = false;
       }
       if (isFunction(widgetTypeInstance.actionSources)) {
         result.actionSources = widgetTypeInstance.actionSources();
@@ -460,18 +614,18 @@ export class WidgetComponentService {
     }
   }
 
-  private processWidgetLoadError(errorMessages: string[], cacheKey: string, widgetInfoSubject: Subject<WidgetInfo>) {
+  private processWidgetLoadError(errorMessages: string[], fullFqn: string, widgetInfoSubject: Subject<WidgetInfo>) {
     if (widgetInfoSubject) {
       widgetInfoSubject.error({
         widgetInfo: this.errorWidgetType,
         errorMessages
       });
     }
-    this.resolveWidgetsInfoFetchQueue(cacheKey, this.errorWidgetType, errorMessages);
+    this.resolveWidgetsInfoFetchQueue(fullFqn, this.errorWidgetType, errorMessages);
   }
 
-  private resolveWidgetsInfoFetchQueue(key: string, widgetInfo: WidgetInfo, errorMessages?: string[]) {
-    const fetchQueue = this.widgetsInfoFetchQueue.get(key);
+  private resolveWidgetsInfoFetchQueue(fullFqn: string, widgetInfo: WidgetInfo, errorMessages?: string[]) {
+    const fetchQueue = this.widgetsInfoFetchQueue.get(fullFqn);
     if (fetchQueue) {
       fetchQueue.forEach(subject => {
         if (!errorMessages) {
@@ -484,37 +638,7 @@ export class WidgetComponentService {
           });
         }
       });
-      this.widgetsInfoFetchQueue.delete(key);
+      this.widgetsInfoFetchQueue.delete(fullFqn);
     }
-  }
-
-  // Cache functions
-
-  private createWidgetInfoCacheKey(bundleAlias: string, widgetTypeAlias: string, isSystem: boolean): string {
-    return `${isSystem ? 'sys_' : ''}${bundleAlias}_${widgetTypeAlias}`;
-  }
-
-  private getWidgetInfoFromCache(bundleAlias: string, widgetTypeAlias: string, isSystem: boolean): WidgetInfo | undefined {
-    const key = this.createWidgetInfoCacheKey(bundleAlias, widgetTypeAlias, isSystem);
-    return this.widgetsInfoInMemoryCache.get(key);
-  }
-
-  private putWidgetInfoToCache(widgetInfo: WidgetInfo, bundleAlias: string, widgetTypeAlias: string, isSystem: boolean) {
-    const key = this.createWidgetInfoCacheKey(bundleAlias, widgetTypeAlias, isSystem);
-    this.widgetsInfoInMemoryCache.set(key, widgetInfo);
-  }
-
-  private deleteWidgetInfoFromCache(bundleAlias: string, widgetTypeAlias: string, isSystem: boolean) {
-    const key = this.createWidgetInfoCacheKey(bundleAlias, widgetTypeAlias, isSystem);
-    this.widgetsInfoInMemoryCache.delete(key);
-  }
-
-  private deleteWidgetsBundleFromCache(bundleAlias: string, isSystem: boolean) {
-    const key = (isSystem ? 'sys_' : '') + bundleAlias;
-    this.widgetsInfoInMemoryCache.forEach((widgetInfo, cacheKey) => {
-      if (cacheKey.startsWith(key)) {
-        this.widgetsInfoInMemoryCache.delete(cacheKey);
-      }
-    });
   }
 }

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -47,11 +47,24 @@ export enum ActionType {
   RELATIONS_DELETED = 'RELATIONS_DELETED',
   ALARM_ACK = 'ALARM_ACK',
   ALARM_CLEAR = 'ALARM_CLEAR',
+  ALARM_ASSIGNED = 'ALARM_ASSIGNED',
+  ALARM_DELETE = 'ALARM_DELETE',
+  ALARM_UNASSIGNED = 'ALARM_UNASSIGNED',
+  ADDED_COMMENT = 'ADDED_COMMENT',
+  UPDATED_COMMENT = 'UPDATED_COMMENT',
+  DELETED_COMMENT = 'DELETED_COMMENT',
   LOGIN = 'LOGIN',
   LOGOUT = 'LOGOUT',
   LOCKOUT = 'LOCKOUT',
   ASSIGNED_FROM_TENANT = 'ASSIGNED_FROM_TENANT',
-  ASSIGNED_TO_TENANT = 'ASSIGNED_TO_TENANT'
+  ASSIGNED_TO_TENANT = 'ASSIGNED_TO_TENANT',
+  PROVISION_SUCCESS = 'PROVISION_SUCCESS',
+  PROVISION_FAILURE = 'PROVISION_FAILURE',
+  TIMESERIES_UPDATED = 'TIMESERIES_UPDATED',
+  TIMESERIES_DELETED = 'TIMESERIES_DELETED',
+  ASSIGNED_TO_EDGE = 'ASSIGNED_TO_EDGE',
+  UNASSIGNED_FROM_EDGE = 'UNASSIGNED_FROM_EDGE',
+  SMS_SENT = 'SMS_SENT'
 }
 
 export enum ActionStatus {
@@ -79,11 +92,24 @@ export const actionTypeTranslations = new Map<ActionType, string>(
     [ActionType.RELATIONS_DELETED, 'audit-log.type-relations-delete'],
     [ActionType.ALARM_ACK, 'audit-log.type-alarm-ack'],
     [ActionType.ALARM_CLEAR, 'audit-log.type-alarm-clear'],
+    [ActionType.ALARM_DELETE, 'audit-log.type-alarm-delete'],
+    [ActionType.ALARM_ASSIGNED, 'audit-log.type-alarm-assign'],
+    [ActionType.ALARM_UNASSIGNED, 'audit-log.type-alarm-unassign'],
+    [ActionType.ADDED_COMMENT, 'audit-log.type-added-comment'],
+    [ActionType.UPDATED_COMMENT, 'audit-log.type-updated-comment'],
+    [ActionType.DELETED_COMMENT, 'audit-log.type-deleted-comment'],
     [ActionType.LOGIN, 'audit-log.type-login'],
     [ActionType.LOGOUT, 'audit-log.type-logout'],
     [ActionType.LOCKOUT, 'audit-log.type-lockout'],
     [ActionType.ASSIGNED_FROM_TENANT, 'audit-log.type-assigned-from-tenant'],
-    [ActionType.ASSIGNED_TO_TENANT, 'audit-log.type-assigned-to-tenant']
+    [ActionType.ASSIGNED_TO_TENANT, 'audit-log.type-assigned-to-tenant'],
+    [ActionType.PROVISION_SUCCESS, 'audit-log.type-provision-success'],
+    [ActionType.PROVISION_FAILURE, 'audit-log.type-provision-failure'],
+    [ActionType.TIMESERIES_UPDATED, 'audit-log.type-timeseries-updated'],
+    [ActionType.TIMESERIES_DELETED, 'audit-log.type-timeseries-deleted'],
+    [ActionType.ASSIGNED_TO_EDGE, 'audit-log.type-assigned-to-edge'],
+    [ActionType.UNASSIGNED_FROM_EDGE, 'audit-log.type-unassigned-from-edge'],
+    [ActionType.SMS_SENT, 'audit-log.type-sms-sent'],
   ]
 );
 

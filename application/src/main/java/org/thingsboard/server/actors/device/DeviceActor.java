@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
 package org.thingsboard.server.actors.device;
 
 import lombok.extern.slf4j.Slf4j;
-import org.thingsboard.rule.engine.api.msg.DeviceAttributesEventNotificationMsg;
-import org.thingsboard.rule.engine.api.msg.DeviceNameOrTypeUpdateMsg;
 import org.thingsboard.server.actors.ActorSystemContext;
 import org.thingsboard.server.actors.TbActorCtx;
 import org.thingsboard.server.actors.TbActorException;
@@ -25,8 +23,13 @@ import org.thingsboard.server.actors.service.ContextAwareActor;
 import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.msg.TbActorMsg;
+import org.thingsboard.server.common.msg.rpc.FromDeviceRpcResponseActorMsg;
+import org.thingsboard.server.common.msg.rpc.RemoveRpcActorMsg;
+import org.thingsboard.server.common.msg.rpc.ToDeviceRpcRequestActorMsg;
+import org.thingsboard.server.common.msg.rule.engine.DeviceAttributesEventNotificationMsg;
+import org.thingsboard.server.common.msg.rule.engine.DeviceEdgeUpdateMsg;
+import org.thingsboard.server.common.msg.rule.engine.DeviceNameOrTypeUpdateMsg;
 import org.thingsboard.server.common.msg.timeout.DeviceActorServerSideRpcTimeoutMsg;
-import org.thingsboard.server.service.rpc.ToDeviceRpcRequestActorMsg;
 import org.thingsboard.server.service.transport.msg.TransportToDeviceActorMsgWrapper;
 
 @Slf4j
@@ -44,7 +47,7 @@ public class DeviceActor extends ContextAwareActor {
         super.init(ctx);
         log.debug("[{}][{}] Starting device actor.", processor.tenantId, processor.deviceId);
         try {
-            processor.initSessionTimeout(ctx);
+            processor.init(ctx);
             log.debug("[{}][{}] Device actor started.", processor.tenantId, processor.deviceId);
         } catch (Exception e) {
             log.warn("[{}][{}] Unknown failure", processor.tenantId, processor.deviceId, e);
@@ -56,13 +59,16 @@ public class DeviceActor extends ContextAwareActor {
     protected boolean doProcess(TbActorMsg msg) {
         switch (msg.getMsgType()) {
             case TRANSPORT_TO_DEVICE_ACTOR_MSG:
-                processor.process(ctx, (TransportToDeviceActorMsgWrapper) msg);
+                processor.process((TransportToDeviceActorMsgWrapper) msg);
                 break;
             case DEVICE_ATTRIBUTES_UPDATE_TO_DEVICE_ACTOR_MSG:
-                processor.processAttributesUpdate(ctx, (DeviceAttributesEventNotificationMsg) msg);
+                processor.processAttributesUpdate((DeviceAttributesEventNotificationMsg) msg);
+                break;
+            case DEVICE_DELETE_TO_DEVICE_ACTOR_MSG:
+                ctx.stop(ctx.getSelf());
                 break;
             case DEVICE_CREDENTIALS_UPDATE_TO_DEVICE_ACTOR_MSG:
-                processor.processCredentialsUpdate();
+                processor.processCredentialsUpdate(msg);
                 break;
             case DEVICE_NAME_OR_TYPE_UPDATE_TO_DEVICE_ACTOR_MSG:
                 processor.processNameOrTypeUpdate((DeviceNameOrTypeUpdateMsg) msg);
@@ -70,11 +76,20 @@ public class DeviceActor extends ContextAwareActor {
             case DEVICE_RPC_REQUEST_TO_DEVICE_ACTOR_MSG:
                 processor.processRpcRequest(ctx, (ToDeviceRpcRequestActorMsg) msg);
                 break;
+            case DEVICE_RPC_RESPONSE_TO_DEVICE_ACTOR_MSG:
+                processor.processRpcResponsesFromEdge((FromDeviceRpcResponseActorMsg) msg);
+                break;
             case DEVICE_ACTOR_SERVER_SIDE_RPC_TIMEOUT_MSG:
-                processor.processServerSideRpcTimeout(ctx, (DeviceActorServerSideRpcTimeoutMsg) msg);
+                processor.processServerSideRpcTimeout((DeviceActorServerSideRpcTimeoutMsg) msg);
                 break;
             case SESSION_TIMEOUT_MSG:
                 processor.checkSessionsTimeout();
+                break;
+            case DEVICE_EDGE_UPDATE_TO_DEVICE_ACTOR_MSG:
+                processor.processEdgeUpdate((DeviceEdgeUpdateMsg) msg);
+                break;
+            case REMOVE_RPC_TO_DEVICE_ACTOR_MSG:
+                processor.processRemoveRpc((RemoveRpcActorMsg) msg);
                 break;
             default:
                 return false;

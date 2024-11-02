@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ import { Observable } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { PageLink } from '@shared/models/page/page-link';
 import { PageData } from '@shared/models/page/page-data';
-import { EntitySubtype } from '@app/shared/models/entity-type.models';
-import { Asset, AssetInfo, AssetSearchQuery } from '@app/shared/models/asset.models';
+import { EntitySubtype } from '@shared/models/entity-type.models';
+import { Asset, AssetInfo, AssetSearchQuery } from '@shared/models/asset.models';
+import { BulkImportRequest, BulkImportResult } from '@shared/import-export/import-export.models';
 
 @Injectable({
   providedIn: 'root'
@@ -37,9 +38,22 @@ export class AssetService {
       defaultHttpOptionsFromConfig(config));
   }
 
+  public getTenantAssetInfosByAssetProfileId(pageLink: PageLink, assetProfileId: string = '',
+                                             config?: RequestConfig): Observable<PageData<AssetInfo>> {
+    return this.http.get<PageData<AssetInfo>>(`/api/tenant/assetInfos${pageLink.toQuery()}&assetProfileId=${assetProfileId}`,
+      defaultHttpOptionsFromConfig(config));
+  }
+
   public getCustomerAssetInfos(customerId: string, pageLink: PageLink, type: string = '',
                                config?: RequestConfig): Observable<PageData<AssetInfo>> {
     return this.http.get<PageData<AssetInfo>>(`/api/customer/${customerId}/assetInfos${pageLink.toQuery()}&type=${type}`,
+      defaultHttpOptionsFromConfig(config));
+  }
+
+  public getCustomerAssetInfosByAssetProfileId(customerId: string, pageLink: PageLink, assetProfileId: string = '',
+                                               config?: RequestConfig): Observable<PageData<AssetInfo>> {
+    return this.http.get<PageData<AssetInfo>>
+    (`/api/customer/${customerId}/assetInfos${pageLink.toQuery()}&assetProfileId=${assetProfileId}`,
       defaultHttpOptionsFromConfig(config));
   }
 
@@ -87,6 +101,26 @@ export class AssetService {
 
   public findByName(assetName: string, config?: RequestConfig): Observable<Asset> {
     return this.http.get<Asset>(`/api/tenant/assets?assetName=${assetName}`, defaultHttpOptionsFromConfig(config));
+  }
+
+  public assignAssetToEdge(edgeId: string, assetId: string, config?: RequestConfig): Observable<Asset> {
+    return this.http.post<Asset>(`/api/edge/${edgeId}/asset/${assetId}`, null,
+      defaultHttpOptionsFromConfig(config));
+  }
+
+  public unassignAssetFromEdge(edgeId: string, assetId: string,
+                               config?: RequestConfig) {
+    return this.http.delete(`/api/edge/${edgeId}/asset/${assetId}`, defaultHttpOptionsFromConfig(config));
+  }
+
+  public getEdgeAssets(edgeId: string, pageLink: PageLink, type: string = '',
+                       config?: RequestConfig): Observable<PageData<AssetInfo>> {
+    return this.http.get<PageData<AssetInfo>>(`/api/edge/${edgeId}/assets${pageLink.toQuery()}&type=${type}`,
+      defaultHttpOptionsFromConfig(config));
+  }
+
+  public bulkImportAssets(entitiesData: BulkImportRequest, config?: RequestConfig): Observable<BulkImportResult> {
+    return this.http.post<BulkImportResult>('/api/asset/bulk_import', entitiesData, defaultHttpOptionsFromConfig(config));
   }
 
 }

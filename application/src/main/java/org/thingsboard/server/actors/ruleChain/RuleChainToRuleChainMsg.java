@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,27 +15,29 @@
  */
 package org.thingsboard.server.actors.ruleChain;
 
-import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
 import org.thingsboard.server.common.data.id.RuleChainId;
 import org.thingsboard.server.common.msg.MsgType;
-import org.thingsboard.server.common.msg.TbActorMsg;
 import org.thingsboard.server.common.msg.TbMsg;
-import org.thingsboard.server.common.msg.aware.RuleChainAwareMsg;
 
 /**
  * Created by ashvayka on 19.03.18.
  */
-@Data
-public final class RuleChainToRuleChainMsg implements TbActorMsg, RuleChainAwareMsg {
+@EqualsAndHashCode(callSuper = true)
+@ToString
+public final class RuleChainToRuleChainMsg extends TbToRuleChainActorMsg  {
 
-    private final RuleChainId target;
+    @Getter
     private final RuleChainId source;
-    private final TbMsg msg;
+    @Getter
     private final String fromRelationType;
 
-    @Override
-    public RuleChainId getRuleChainId() {
-        return target;
+    public RuleChainToRuleChainMsg(RuleChainId target, RuleChainId source, TbMsg tbMsg, String fromRelationType) {
+        super(tbMsg, target);
+        this.source = source;
+        this.fromRelationType = fromRelationType;
     }
 
     @Override

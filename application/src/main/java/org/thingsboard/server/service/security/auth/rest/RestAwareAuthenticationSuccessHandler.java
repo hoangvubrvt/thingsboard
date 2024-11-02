@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,55 +15,56 @@
  */
 package org.thingsboard.server.service.security.auth.rest;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.WebAttributes;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
-import org.thingsboard.server.service.security.auth.jwt.RefreshTokenRepository;
+import org.thingsboard.common.util.JacksonUtil;
+import org.thingsboard.server.common.data.security.Authority;
+import org.thingsboard.server.common.data.security.model.JwtPair;
+import org.thingsboard.server.service.security.auth.MfaAuthenticationToken;
+import org.thingsboard.server.service.security.auth.mfa.config.TwoFaConfigManager;
 import org.thingsboard.server.service.security.model.SecurityUser;
-import org.thingsboard.server.service.security.model.token.JwtToken;
 import org.thingsboard.server.service.security.model.token.JwtTokenFactory;
 
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 @Component(value = "defaultAuthenticationSuccessHandler")
+@RequiredArgsConstructor
 public class RestAwareAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
-    private final ObjectMapper mapper;
     private final JwtTokenFactory tokenFactory;
-    private final RefreshTokenRepository refreshTokenRepository;
-
-    @Autowired
-    public RestAwareAuthenticationSuccessHandler(final ObjectMapper mapper, final JwtTokenFactory tokenFactory, final RefreshTokenRepository refreshTokenRepository) {
-        this.mapper = mapper;
-        this.tokenFactory = tokenFactory;
-        this.refreshTokenRepository = refreshTokenRepository;
-    }
+    private final TwoFaConfigManager twoFaConfigManager;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
         SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+        JwtPair tokenPair = new JwtPair();
 
-        JwtToken accessToken = tokenFactory.createAccessJwtToken(securityUser);
-        JwtToken refreshToken = refreshTokenRepository.requestRefreshToken(securityUser);
-
-        Map<String, String> tokenMap = new HashMap<String, String>();
-        tokenMap.put("token", accessToken.getToken());
-        tokenMap.put("refreshToken", refreshToken.getToken());
+        if (authentication instanceof MfaAuthenticationToken) {
+            int preVerificationTokenLifetime = twoFaConfigManager.getPlatformTwoFaSettings(securityUser.getTenantId(), true)
+                    .flatMap(settings -> Optional.ofNullable(settings.getTotalAllowedTimeForVerification())
+                            .filter(time -> time > 0))
+                    .orElse((int) TimeUnit.MINUTES.toSeconds(30));
+            tokenPair.setToken(tokenFactory.createPreVerificationToken(securityUser, preVerificationTokenLifetime).getToken());
+            tokenPair.setRefreshToken(null);
+            tokenPair.setScope(Authority.PRE_VERIFICATION_TOKEN);
+        } else {
+            tokenPair = tokenFactory.createTokenPair(securityUser);
+        }
 
         response.setStatus(HttpStatus.OK.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        mapper.writeValue(response.getWriter(), tokenMap);
+        JacksonUtil.writeValue(response.getWriter(), tokenPair);
 
         clearAuthenticationAttributes(request);
     }

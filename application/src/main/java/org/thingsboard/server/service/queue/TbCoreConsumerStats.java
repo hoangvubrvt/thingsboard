@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,13 @@
 package org.thingsboard.server.service.queue;
 
 import lombok.extern.slf4j.Slf4j;
-import org.thingsboard.server.gen.transport.TransportProtos;
 import org.thingsboard.server.common.stats.StatsCounter;
 import org.thingsboard.server.common.stats.StatsFactory;
 import org.thingsboard.server.common.stats.StatsType;
+import org.thingsboard.server.gen.transport.TransportProtos;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 public class TbCoreConsumerStats {
@@ -35,7 +36,20 @@ public class TbCoreConsumerStats {
     public static final String DEVICE_CLAIMS = "claimDevice";
     public static final String DEVICE_STATES = "deviceState";
     public static final String SUBSCRIPTION_MSGS = "subMsgs";
-    public static final String TO_CORE_NOTIFICATIONS = "coreNfs";
+    public static final String DEVICE_CONNECTS = "deviceConnect";
+    public static final String DEVICE_ACTIVITIES = "deviceActivity";
+    public static final String DEVICE_DISCONNECTS = "deviceDisconnect";
+    public static final String DEVICE_INACTIVITIES = "deviceInactivity";
+
+    public static final String TO_CORE_NF_OTHER = "coreNfOther"; // normally, there is no messages when codebase is fine
+    public static final String TO_CORE_NF_COMPONENT_LIFECYCLE = "coreNfCompLfcl";
+    public static final String TO_CORE_NF_DEVICE_RPC_RESPONSE = "coreNfDevRpcRsp";
+    public static final String TO_CORE_NF_NOTIFICATION_RULE_PROCESSOR = "coreNfNfRlProc";
+    public static final String TO_CORE_NF_QUEUE_UPDATE = "coreNfQueueUpd";
+    public static final String TO_CORE_NF_QUEUE_DELETE = "coreNfQueueDel";
+    public static final String TO_CORE_NF_SUBSCRIPTION_SERVICE = "coreNfSubSvc";
+    public static final String TO_CORE_NF_SUBSCRIPTION_MANAGER = "coreNfSubMgr";
+    public static final String TO_CORE_NF_VC_RESPONSE = "coreNfVCRsp";
 
     private final StatsCounter totalCounter;
     private final StatsCounter sessionEventCounter;
@@ -45,41 +59,58 @@ public class TbCoreConsumerStats {
     private final StatsCounter toDeviceRPCCallResponseCounter;
     private final StatsCounter subscriptionInfoCounter;
     private final StatsCounter claimDeviceCounter;
-
     private final StatsCounter deviceStateCounter;
     private final StatsCounter subscriptionMsgCounter;
-    private final StatsCounter toCoreNotificationsCounter;
+    private final StatsCounter deviceConnectsCounter;
+    private final StatsCounter deviceActivitiesCounter;
+    private final StatsCounter deviceDisconnectsCounter;
+    private final StatsCounter deviceInactivitiesCounter;
 
-    private final List<StatsCounter> counters = new ArrayList<>();
+    private final StatsCounter toCoreNfOtherCounter;
+    private final StatsCounter toCoreNfComponentLifecycleCounter;
+    private final StatsCounter toCoreNfDeviceRpcResponseCounter;
+    private final StatsCounter toCoreNfNotificationRuleProcessorCounter;
+    private final StatsCounter toCoreNfQueueUpdateCounter;
+    private final StatsCounter toCoreNfQueueDeleteCounter;
+    private final StatsCounter toCoreNfSubscriptionServiceCounter;
+    private final StatsCounter toCoreNfSubscriptionManagerCounter;
+    private final StatsCounter toCoreNfVersionControlResponseCounter;
+
+    private final List<StatsCounter> counters = new ArrayList<>(23);
 
     public TbCoreConsumerStats(StatsFactory statsFactory) {
         String statsKey = StatsType.CORE.getName();
 
-        this.totalCounter = statsFactory.createStatsCounter(statsKey, TOTAL_MSGS);
-        this.sessionEventCounter = statsFactory.createStatsCounter(statsKey, SESSION_EVENTS);
-        this.getAttributesCounter = statsFactory.createStatsCounter(statsKey, GET_ATTRIBUTE);
-        this.subscribeToAttributesCounter = statsFactory.createStatsCounter(statsKey, ATTRIBUTE_SUBSCRIBES);
-        this.subscribeToRPCCounter = statsFactory.createStatsCounter(statsKey, RPC_SUBSCRIBES);
-        this.toDeviceRPCCallResponseCounter = statsFactory.createStatsCounter(statsKey, TO_DEVICE_RPC_CALL_RESPONSES);
-        this.subscriptionInfoCounter = statsFactory.createStatsCounter(statsKey, SUBSCRIPTION_INFO);
-        this.claimDeviceCounter = statsFactory.createStatsCounter(statsKey, DEVICE_CLAIMS);
-        this.deviceStateCounter = statsFactory.createStatsCounter(statsKey, DEVICE_STATES);
-        this.subscriptionMsgCounter = statsFactory.createStatsCounter(statsKey, SUBSCRIPTION_MSGS);
-        this.toCoreNotificationsCounter = statsFactory.createStatsCounter(statsKey, TO_CORE_NOTIFICATIONS);
+        this.totalCounter = register(statsFactory.createStatsCounter(statsKey, TOTAL_MSGS));
+        this.sessionEventCounter = register(statsFactory.createStatsCounter(statsKey, SESSION_EVENTS));
+        this.getAttributesCounter = register(statsFactory.createStatsCounter(statsKey, GET_ATTRIBUTE));
+        this.subscribeToAttributesCounter = register(statsFactory.createStatsCounter(statsKey, ATTRIBUTE_SUBSCRIBES));
+        this.subscribeToRPCCounter = register(statsFactory.createStatsCounter(statsKey, RPC_SUBSCRIBES));
+        this.toDeviceRPCCallResponseCounter = register(statsFactory.createStatsCounter(statsKey, TO_DEVICE_RPC_CALL_RESPONSES));
+        this.subscriptionInfoCounter = register(statsFactory.createStatsCounter(statsKey, SUBSCRIPTION_INFO));
+        this.claimDeviceCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_CLAIMS));
+        this.deviceStateCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_STATES));
+        this.subscriptionMsgCounter = register(statsFactory.createStatsCounter(statsKey, SUBSCRIPTION_MSGS));
+        this.deviceConnectsCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_CONNECTS));
+        this.deviceActivitiesCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_ACTIVITIES));
+        this.deviceDisconnectsCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_DISCONNECTS));
+        this.deviceInactivitiesCounter = register(statsFactory.createStatsCounter(statsKey, DEVICE_INACTIVITIES));
 
+        // Core notification counters
+        this.toCoreNfOtherCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_OTHER));
+        this.toCoreNfComponentLifecycleCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_COMPONENT_LIFECYCLE));
+        this.toCoreNfDeviceRpcResponseCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_DEVICE_RPC_RESPONSE));
+        this.toCoreNfNotificationRuleProcessorCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_NOTIFICATION_RULE_PROCESSOR));
+        this.toCoreNfQueueUpdateCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_QUEUE_UPDATE));
+        this.toCoreNfQueueDeleteCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_QUEUE_DELETE));
+        this.toCoreNfSubscriptionServiceCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_SUBSCRIPTION_SERVICE));
+        this.toCoreNfSubscriptionManagerCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_SUBSCRIPTION_MANAGER));
+        this.toCoreNfVersionControlResponseCounter = register(statsFactory.createStatsCounter(statsKey, TO_CORE_NF_VC_RESPONSE));
+    }
 
-        counters.add(totalCounter);
-        counters.add(sessionEventCounter);
-        counters.add(getAttributesCounter);
-        counters.add(subscribeToAttributesCounter);
-        counters.add(subscribeToRPCCounter);
-        counters.add(toDeviceRPCCallResponseCounter);
-        counters.add(subscriptionInfoCounter);
-        counters.add(claimDeviceCounter);
-
-        counters.add(deviceStateCounter);
-        counters.add(subscriptionMsgCounter);
-        counters.add(toCoreNotificationsCounter);
+    private StatsCounter register(StatsCounter counter) {
+        counters.add(counter);
+        return counter;
     }
 
     public void log(TransportProtos.TransportToDeviceActorMsg msg) {
@@ -112,6 +143,26 @@ public class TbCoreConsumerStats {
         deviceStateCounter.increment();
     }
 
+    public void log(TransportProtos.DeviceConnectProto msg) {
+        totalCounter.increment();
+        deviceConnectsCounter.increment();
+    }
+
+    public void log(TransportProtos.DeviceActivityProto msg) {
+        totalCounter.increment();
+        deviceActivitiesCounter.increment();
+    }
+
+    public void log(TransportProtos.DeviceDisconnectProto msg) {
+        totalCounter.increment();
+        deviceDisconnectsCounter.increment();
+    }
+
+    public void log(TransportProtos.DeviceInactivityProto msg) {
+        totalCounter.increment();
+        deviceInactivitiesCounter.increment();
+    }
+
     public void log(TransportProtos.SubscriptionMgrMsgProto msg) {
         totalCounter.increment();
         subscriptionMsgCounter.increment();
@@ -119,16 +170,33 @@ public class TbCoreConsumerStats {
 
     public void log(TransportProtos.ToCoreNotificationMsg msg) {
         totalCounter.increment();
-        toCoreNotificationsCounter.increment();
+        if (msg.hasToLocalSubscriptionServiceMsg()) {
+            toCoreNfSubscriptionServiceCounter.increment();
+        } else if (msg.hasFromDeviceRpcResponse()) {
+            toCoreNfDeviceRpcResponseCounter.increment();
+        } else if (msg.hasComponentLifecycle()) {
+            toCoreNfComponentLifecycleCounter.increment();
+        } else if (msg.getQueueUpdateMsgsCount() > 0) {
+            toCoreNfQueueUpdateCounter.increment();
+        } else if (msg.getQueueDeleteMsgsCount() > 0) {
+            toCoreNfQueueDeleteCounter.increment();
+        } else if (msg.hasVcResponseMsg()) {
+            toCoreNfVersionControlResponseCounter.increment();
+        } else if (msg.hasToSubscriptionMgrMsg()) {
+            toCoreNfSubscriptionManagerCounter.increment();
+        } else if (msg.hasNotificationRuleProcessorMsg()) {
+            toCoreNfNotificationRuleProcessorCounter.increment();
+        } else {
+            toCoreNfOtherCounter.increment();
+        }
     }
 
     public void printStats() {
         int total = totalCounter.get();
         if (total > 0) {
             StringBuilder stats = new StringBuilder();
-            counters.forEach(counter -> {
-                stats.append(counter.getName()).append(" = [").append(counter.get()).append("] ");
-            });
+            counters.forEach(counter ->
+                    stats.append(counter.getName()).append(" = [").append(counter.get()).append("] "));
             log.info("Core Stats: {}", stats);
         }
     }
@@ -136,4 +204,5 @@ public class TbCoreConsumerStats {
     public void reset() {
         counters.forEach(StatsCounter::clear);
     }
+
 }

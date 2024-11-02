@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -16,6 +16,10 @@
 
 import { EntityType } from '@shared/models/entity-type.models';
 import { AttributeData } from './telemetry/telemetry.models';
+import { EntityId } from '@shared/models/id/entity-id';
+import { DeviceCredentialMQTTBasic } from '@shared/models/device.models';
+import { Lwm2mSecurityConfigModels } from '@shared/models/lwm2m-security-config.models';
+import { TenantId } from '@shared/models/id/tenant-id';
 
 export interface EntityInfo {
   name?: string;
@@ -25,18 +29,34 @@ export interface EntityInfo {
   entityDescription?: string;
 }
 
+export interface EntityInfoData {
+  id: EntityId;
+  name: string;
+}
+
 export interface ImportEntityData {
+  lineNumber: number;
   name: string;
   type: string;
   label: string;
   gateway: boolean;
   description: string;
-  accessToken: string;
+  credential: {
+    accessToken?: string;
+    x509?: string;
+    mqtt?: DeviceCredentialMQTTBasic;
+    lwm2m?: Lwm2mSecurityConfigModels;
+  };
   attributes: {
     server: AttributeData[],
     shared: AttributeData[]
   };
   timeseries: AttributeData[];
+}
+
+export interface EdgeImportEntityData extends ImportEntityData {
+  secret: string;
+  routingKey: string;
 }
 
 export interface ImportEntitiesResultInfo {
@@ -48,6 +68,7 @@ export interface ImportEntitiesResultInfo {
   };
   error?: {
     entity: number;
+    errors?: string;
   };
 }
 
@@ -56,6 +77,12 @@ export interface EntityField {
   value: string;
   name: string;
   time?: boolean;
+}
+
+export interface EntitiesKeysByQuery {
+  attribute: Array<string>;
+  timeseries: Array<string>;
+  entityTypes: EntityType[];
 }
 
 export const entityFields: {[fieldName: string]: EntityField} = {
@@ -134,5 +161,33 @@ export const entityFields: {[fieldName: string]: EntityField} = {
     keyName: 'label',
     name: 'entity-field.label',
     value: 'label'
+  },
+  queueName: {
+    keyName: 'queueName',
+    name: 'entity-field.queue-name',
+    value: 'queueName'
+  },
+  serviceId: {
+    keyName: 'serviceId',
+    name: 'entity-field.service-id',
+    value: 'serviceId'
+  },
+  ownerName: {
+    keyName: 'ownerName',
+    name: 'entity-field.owner-name',
+    value: 'ownerName'
+  },
+  ownerType: {
+    keyName: 'ownerType',
+    name: 'entity-field.owner-type',
+    value: 'ownerType'
   }
 };
+
+export interface HasTenantId {
+  tenantId?: TenantId;
+}
+
+export interface HasVersion {
+  version?: number;
+}

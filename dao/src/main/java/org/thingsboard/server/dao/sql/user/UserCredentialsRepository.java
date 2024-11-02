@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 package org.thingsboard.server.dao.sql.user;
 
-import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
 import org.thingsboard.server.dao.model.sql.UserCredentialsEntity;
 
 import java.util.UUID;
@@ -23,11 +26,30 @@ import java.util.UUID;
 /**
  * Created by Valerii Sosliuk on 4/22/2017.
  */
-public interface UserCredentialsRepository extends CrudRepository<UserCredentialsEntity, UUID> {
+public interface UserCredentialsRepository extends JpaRepository<UserCredentialsEntity, UUID> {
 
     UserCredentialsEntity findByUserId(UUID userId);
 
     UserCredentialsEntity findByActivateToken(String activateToken);
 
     UserCredentialsEntity findByResetToken(String resetToken);
+
+    @Transactional
+    void removeByUserId(UUID userId);
+
+    @Transactional
+    @Modifying
+    @Query("UPDATE UserCredentialsEntity SET lastLoginTs = :lastLoginTs WHERE userId = :userId")
+    void updateLastLoginTsByUserId(UUID userId, long lastLoginTs);
+
+    @Transactional
+    @Query(value = "UPDATE user_credentials SET failed_login_attempts = coalesce(failed_login_attempts, 0) + 1 " +
+            "WHERE user_id = :userId RETURNING failed_login_attempts", nativeQuery = true)
+    int incrementFailedLoginAttemptsByUserId(UUID userId);
+
+    @Transactional
+    @Modifying
+    @Query("UPDATE UserCredentialsEntity SET failedLoginAttempts = :failedLoginAttempts WHERE userId = :userId")
+    void updateFailedLoginAttemptsByUserId(UUID userId, int failedLoginAttempts);
+
 }

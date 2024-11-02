@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,19 +14,15 @@
 /// limitations under the License.
 ///
 
-import { JsonSettingsSchema } from '@shared/models/widget.models';
-import { MapProviders } from './map-models';
+import LeafletMap from '@home/components/widget/lib/maps/leaflet-map';
 
 export interface MapWidgetInterface {
-    resize(),
-    update(),
-    onInit(),
-    onDestroy();
+    map?: LeafletMap;
+    resize(): void;
+    update(): void;
+    destroy(): void;
 }
 
 export interface MapWidgetStaticInterface {
-    settingsSchema(mapProvider?: MapProviders, drawRoutes?: boolean): JsonSettingsSchema;
-    getProvidersSchema(mapProvider?: MapProviders, ignoreImageMap?: boolean): JsonSettingsSchema
-    dataKeySettingsSchema(): object;
     actionSources(): object;
 }

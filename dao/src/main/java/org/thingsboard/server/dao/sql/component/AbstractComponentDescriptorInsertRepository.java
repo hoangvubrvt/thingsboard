@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,9 @@
  */
 package org.thingsboard.server.dao.sql.component;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.Query;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,10 +27,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.thingsboard.server.dao.model.sql.ComponentDescriptorEntity;
-
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
-import javax.persistence.Query;
 
 @Slf4j
 public abstract class AbstractComponentDescriptorInsertRepository implements ComponentDescriptorInsertRepository {
@@ -51,11 +50,11 @@ public abstract class AbstractComponentDescriptorInsertRepository implements Com
                 TransactionStatus transaction = getTransactionStatus(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                 try {
                     componentDescriptorEntity = processSaveOrUpdate(entity, insertOrUpdateOnUniqueKeyConflict);
+                    transactionManager.commit(transaction);
                 } catch (Throwable th) {
                     log.trace("Could not execute the update statement for Component Descriptor with id {}, name {} and entityType {}", entity.getUuid(), entity.getName(), entity.getType());
                     transactionManager.rollback(transaction);
                 }
-                transactionManager.commit(transaction);
             } else {
                 log.trace("Could not execute the insert statement for Component Descriptor with id {}, name {} and entityType {}", entity.getUuid(), entity.getName(), entity.getType());
             }
@@ -73,10 +72,12 @@ public abstract class AbstractComponentDescriptorInsertRepository implements Com
                 .setParameter("actions", entity.getActions())
                 .setParameter("clazz", entity.getClazz())
                 .setParameter("configuration_descriptor", entity.getConfigurationDescriptor().toString())
+                .setParameter("configuration_version", entity.getConfigurationVersion())
                 .setParameter("name", entity.getName())
                 .setParameter("scope", entity.getScope().name())
-                .setParameter("search_text", entity.getSearchText())
-                .setParameter("type", entity.getType().name());
+                .setParameter("type", entity.getType().name())
+                .setParameter("clustering_mode", entity.getClusteringMode().name())
+                .setParameter("has_queue_name", entity.isHasQueueName());
     }
 
     private ComponentDescriptorEntity processSaveOrUpdate(ComponentDescriptorEntity entity, String query) {

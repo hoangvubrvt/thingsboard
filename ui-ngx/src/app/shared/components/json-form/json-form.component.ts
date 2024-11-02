@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,35 +15,33 @@
 ///
 
 import {
+  ChangeDetectorRef,
   Component,
   ElementRef,
   forwardRef,
   Input,
   OnChanges,
   OnDestroy,
-  OnInit,
+  Renderer2,
   SimpleChanges,
-  ViewChild,
+  ViewChild, ViewContainerRef,
   ViewEncapsulation
 } from '@angular/core';
-import { ControlValueAccessor, FormControl, NG_VALIDATORS, NG_VALUE_ACCESSOR, Validator } from '@angular/forms';
+import { ControlValueAccessor, UntypedFormControl, NG_VALIDATORS, NG_VALUE_ACCESSOR, Validator } from '@angular/forms';
 import { coerceBooleanProperty } from '@angular/cdk/coercion';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
-import { deepClone, isString } from '@app/core/utils';
-import { TranslateService } from '@ngx-translate/core';
+import { deepClone, isString, unwrapModule } from '@app/core/utils';
 import { JsonFormProps } from './react/json-form.models';
 import inspector from 'schema-inspector';
-import * as tinycolor_ from 'tinycolor2';
+import tinycolor from 'tinycolor2';
 import { DialogService } from '@app/core/services/dialog.service';
-import * as React from 'react';
-import * as ReactDOM from 'react-dom';
-import ReactSchemaForm from './react/json-form-react';
 import JsonFormUtils from './react/json-form-utils';
 import { JsonFormComponentData } from './json-form-component.models';
 import { GroupInfo } from '@shared/models/widget.models';
-
-const tinycolor = tinycolor_;
+import { Observable } from 'rxjs/internal/Observable';
+import { forkJoin, from } from 'rxjs';
+import { TbPopoverService } from '@shared/components/popover.service';
 
 @Component({
   selector: 'tb-json-form',
@@ -63,10 +61,13 @@ const tinycolor = tinycolor_;
   ],
   encapsulation: ViewEncapsulation.None
 })
-export class JsonFormComponent implements OnInit, ControlValueAccessor, Validator, OnChanges, OnDestroy {
+export class JsonFormComponent implements ControlValueAccessor, Validator, OnChanges, OnDestroy {
 
   @ViewChild('reactRoot', {static: true})
   reactRootElmRef: ElementRef<HTMLElement>;
+
+  @ViewChild('reactFullscreen', {static: true})
+  reactFullscreenElmRef: ElementRef<HTMLElement>;
 
   private readonlyValue: boolean;
   get readonly(): boolean {
@@ -87,7 +88,8 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
     onModelChange: this.onModelChange.bind(this),
     onColorClick: this.onColorClick.bind(this),
     onIconClick: this.onIconClick.bind(this),
-    onToggleFullscreen: this.onToggleFullscreen.bind(this)
+    onToggleFullscreen: this.onToggleFullscreen.bind(this),
+    onHelpClick: this.onHelpClick.bind(this)
   };
 
   data: JsonFormComponentData;
@@ -100,8 +102,9 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
   isModelValid = true;
 
   isFullscreen = false;
-  targetFullscreenElement: HTMLElement;
-  fullscreenFinishFn: () => void;
+  fullscreenFinishFn: (el: Element) => void;
+
+  private reactRoot: any;
 
   private propagateChange = null;
   private propagateChangePending = false;
@@ -109,12 +112,12 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
   private updateViewPending = false;
 
   constructor(public elementRef: ElementRef,
-              private translate: TranslateService,
               private dialogs: DialogService,
-              protected store: Store<AppState>) {
-  }
-
-  ngOnInit(): void {
+              private popoverService: TbPopoverService,
+              private renderer: Renderer2,
+              private viewContainerRef: ViewContainerRef,
+              protected store: Store<AppState>,
+              private cd: ChangeDetectorRef) {
   }
 
   ngOnDestroy(): void {
@@ -137,7 +140,7 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
   setDisabledState(isDisabled: boolean): void {
   }
 
-  public validate(c: FormControl) {
+  public validate(c: UntypedFormControl) {
     return this.isModelValid ? null : {
       modelValid: false
     };
@@ -206,36 +209,41 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
   private onColorClick(key: (string | number)[],
                        val: tinycolor.ColorFormats.RGBA,
                        colorSelectedFn: (color: tinycolor.ColorFormats.RGBA) => void) {
-    this.dialogs.colorPicker(tinycolor(val).toRgbString()).subscribe((color) => {
-      if (colorSelectedFn) {
-        colorSelectedFn(tinycolor(color).toRgb());
+    this.dialogs.colorPicker(tinycolor(val).toRgbString()).subscribe((result) => {
+      if (!result?.canceled && colorSelectedFn) {
+        colorSelectedFn(tinycolor(result?.color).toRgb());
       }
     });
   }
 
   private onIconClick(key: (string | number)[],
-                       val: string,
-                       iconSelectedFn: (icon: string) => void) {
-    this.dialogs.materialIconPicker(val).subscribe((icon) => {
-      if (icon && iconSelectedFn) {
-        iconSelectedFn(icon);
+                      val: string,
+                      iconSelectedFn: (icon: string) => void) {
+    this.dialogs.materialIconPicker(val).subscribe((result) => {
+      if (!result?.canceled && iconSelectedFn) {
+        iconSelectedFn(result?.icon);
       }
     });
   }
 
-  private onToggleFullscreen(element: HTMLElement, fullscreenFinishFn?: () => void) {
-    this.targetFullscreenElement = element;
+  private onToggleFullscreen(fullscreenFinishFn?: (el: Element) => void) {
     this.isFullscreen = !this.isFullscreen;
     this.fullscreenFinishFn = fullscreenFinishFn;
+    this.cd.markForCheck();
   }
 
   onFullscreenChanged(fullscreen: boolean) {
     this.formProps.isFullscreen = fullscreen;
     this.renderReactSchemaForm(false);
     if (this.fullscreenFinishFn) {
-      this.fullscreenFinishFn();
+      this.fullscreenFinishFn(this.reactFullscreenElmRef.nativeElement);
       this.fullscreenFinishFn = null;
     }
+  }
+
+  private onHelpClick(event: MouseEvent, helpId: string, helpVisibleFn: (visible: boolean) => void, helpReadyFn: (ready: boolean) => void) {
+    const trigger = event.currentTarget as Element;
+    this.popoverService.toggleHelpPopover(trigger, this.renderer, this.viewContainerRef, helpId, '', helpVisibleFn, helpReadyFn);
   }
 
   private updateAndRender() {
@@ -252,11 +260,27 @@ export class JsonFormComponent implements OnInit, ControlValueAccessor, Validato
     if (destroy) {
       this.destroyReactSchemaForm();
     }
-    ReactDOM.render(React.createElement(ReactSchemaForm, this.formProps), this.reactRootElmRef.nativeElement);
+
+    // import ReactSchemaForm from './react/json-form-react';
+    const reactSchemaFormObservables: Observable<any>[] = [
+      from(import('react')),
+      from(import('react-dom')),
+      from(import('react-dom/client')),
+      from(import('./react/json-form-react'))
+    ];
+    forkJoin(reactSchemaFormObservables).subscribe(
+      (modules) => {
+        const react = unwrapModule(modules[0]);
+        const reactDomClient =  unwrapModule(modules[2]);
+        const jsonFormReact = unwrapModule(modules[3]);
+        this.reactRoot = reactDomClient.createRoot(this.reactRootElmRef.nativeElement);
+        this.reactRoot.render(react.createElement(jsonFormReact, this.formProps));
+      }
+    );
   }
 
   private destroyReactSchemaForm() {
-    ReactDOM.unmountComponentAtNode(this.reactRootElmRef.nativeElement);
+    this.reactRoot?.unmount();
   }
 
   private validateModel(): boolean {

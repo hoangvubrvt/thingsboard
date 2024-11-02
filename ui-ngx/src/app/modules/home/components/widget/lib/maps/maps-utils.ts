@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,26 +15,32 @@
 ///
 
 import L from 'leaflet';
-import { FormattedData, MarkerSettings, PolygonSettings, PolylineSettings } from './map-models';
-import { Datasource, DatasourceData } from '@app/shared/models/widget.models';
-import _ from 'lodash';
-import { Observable, Observer, of } from 'rxjs';
-import { map } from 'rxjs/operators';
-import { createLabelFromDatasource, hashCode, isNumber, isUndefined, padValue } from '@core/utils';
-import { Form } from '@angular/forms';
+import {
+  GenericFunction,
+  ShowTooltipAction, WidgetToolipSettings
+} from './map-models';
+import { Datasource, FormattedData } from '@app/shared/models/widget.models';
+import { fillDataPattern, isDefinedAndNotNull, isString, processDataPattern, safeExecute } from '@core/utils';
+import { parseWithTranslation } from '@home/components/widget/lib/maps/common-maps-utils';
 
 export function createTooltip(target: L.Layer,
-    settings: MarkerSettings | PolylineSettings | PolygonSettings,
-    datasource: Datasource,
-    content?: string | HTMLElement
+                              settings: Partial<WidgetToolipSettings>,
+                              datasource: Datasource,
+                              autoClose = false,
+                              showTooltipAction = ShowTooltipAction.click,
+                              content?: string | HTMLElement
 ): L.Popup {
     const popup = L.popup();
     popup.setContent(content);
-    target.bindPopup(popup, { autoClose: settings.autocloseTooltip, closeOnClick: false });
-    if (settings.showTooltipAction === 'hover') {
+    target.bindPopup(popup, { autoClose, closeOnClick: false });
+    if (showTooltipAction === ShowTooltipAction.hover) {
         target.off('click');
         target.on('mouseover', () => {
             target.openPopup();
+        });
+        target.on('mousemove', (e) => {
+            // @ts-ignore
+            popup.setLatLng(e.latlng);
         });
         target.on('mouseout', () => {
             target.closePopup();
@@ -42,11 +48,14 @@ export function createTooltip(target: L.Layer,
     }
     target.on('popupopen', () => {
       bindPopupActions(popup, settings, datasource);
+      (target as any)._popup._closeButton.addEventListener('click', (event: Event) => {
+        event.preventDefault();
+      });
     });
     return popup;
 }
 
-export function bindPopupActions(popup: L.Popup, settings: MarkerSettings | PolylineSettings | PolygonSettings,
+export function bindPopupActions(popup: L.Popup, settings: Partial<WidgetToolipSettings>,
                                  datasource: Datasource) {
   const actions = popup.getElement().getElementsByClassName('tb-custom-action');
   Array.from(actions).forEach(
@@ -62,262 +71,55 @@ export function bindPopupActions(popup: L.Popup, settings: MarkerSettings | Poly
     });
 }
 
-export function getRatio(firsMoment: number, secondMoment: number, intermediateMoment: number): number {
-    return (intermediateMoment - firsMoment) / (secondMoment - firsMoment);
-}
-
-export function interpolateOnLineSegment(
-  pointA: FormattedData,
-  pointB: FormattedData,
-  latKeyName: string,
-  lngKeyName: string,
-  ratio: number
-): { [key: string]: number } {
-   return {
-    [latKeyName]: (pointA[latKeyName] + (pointB[latKeyName] - pointA[latKeyName]) * ratio),
-    [lngKeyName]: (pointA[lngKeyName] + (pointB[lngKeyName] - pointA[lngKeyName]) * ratio)
-  };
-}
-
-export function findAngle(startPoint: FormattedData, endPoint: FormattedData, latKeyName: string, lngKeyName: string): number {
-  if(isUndefined(startPoint) || isUndefined(endPoint)){
-    return 0;
+export function isCutPolygon(data): boolean {
+  if (data.length > 1 && Array.isArray(data[0]) && (Array.isArray(data[0][0]) || data[0][0] instanceof L.LatLng)) {
+    return true;
   }
-  let angle = -Math.atan2(endPoint[latKeyName] - startPoint[latKeyName], endPoint[lngKeyName] - startPoint[lngKeyName]);
-  angle = angle * 180 / Math.PI;
-  return parseInt(angle.toFixed(2), 10);
+  return false;
 }
 
-
-export function getDefCenterPosition(position) {
-    if (typeof (position) === 'string')
-        return position.split(',');
-    if (typeof (position) === 'object')
-        return position;
-    return [0, 0];
-}
-
-
-const imageAspectMap = {};
-
-function imageLoader(imageUrl: string): Observable<HTMLImageElement> {
-  return new Observable((observer: Observer<HTMLImageElement>) => {
-    const image = document.createElement('img'); // support IE
-    image.style.position = 'absolute';
-    image.style.left = '-99999px';
-    image.style.top = '-99999px';
-    image.onload = () => {
-      observer.next(image);
-      document.body.removeChild(image);
-      observer.complete();
-    };
-    image.onerror = err => {
-      observer.error(err);
-      document.body.removeChild(image);
-      observer.complete();
-    };
-    document.body.appendChild(image)
-    image.src = imageUrl;
-  });
-}
-
-export function aspectCache(imageUrl: string): Observable<number> {
-  if (imageUrl?.length) {
-    const hash = hashCode(imageUrl);
-    let aspect = imageAspectMap[hash];
-    if (aspect) {
-      return of(aspect);
-    }
-    else return imageLoader(imageUrl).pipe(map(image => {
-      aspect = image.width / image.height;
-      imageAspectMap[hash] = aspect;
-      return aspect;
-    }))
-  }
-}
-
-export type TranslateFunc = (key: string, defaultTranslation?: string) => string;
-
-const varsRegex = /\${([^}]*)}/g;
-const linkActionRegex = /<link-act name=['"]([^['"]*)['"]>([^<]*)<\/link-act>/g;
-const buttonActionRegex = /<button-act name=['"]([^['"]*)['"]>([^<]*)<\/button-act>/g;
-
-function createLinkElement(actionName: string, actionText: string): string {
-  return `<a href="javascript:void(0);" class="tb-custom-action" data-action-name=${actionName}>${actionText}</a>`;
-}
-
-function createButtonElement(actionName: string, actionText: string) {
-  return `<button mat-button class="tb-custom-action" data-action-name=${actionName}>${actionText}</button>`;
-}
-
-function parseTemplate(template: string, data: { $datasource?: Datasource, [key: string]: any },
-                       translateFn?: TranslateFunc) {
-  let res = '';
+export function isJSON(data: string): boolean {
   try {
-    if (translateFn) {
-      template = translateFn(template);
-    }
-    template = createLabelFromDatasource(data.$datasource, template);
-
-    let match = /\${([^}]*)}/g.exec(template);
-    while (match !== null) {
-      const variable = match[0];
-      let label = match[1];
-      let valDec = 2;
-      const splitValues = label.split(':');
-      if (splitValues.length > 1) {
-        label = splitValues[0];
-        valDec = parseFloat(splitValues[1]);
-      }
-
-      if (label.startsWith('#')) {
-        const keyIndexStr = label.substring(1);
-        const n = Math.floor(Number(keyIndexStr));
-        if (String(n) === keyIndexStr && n >= 0) {
-          label = data.$datasource.dataKeys[n].label;
-        }
-      }
-
-      const value = data[label] || '';
-      let textValue: string;
-      if (isNumber(value)) {
-        textValue = padValue(value, valDec);
-      } else {
-        textValue = value;
-      }
-      template = template.split(variable).join(textValue);
-      match = /\${([^}]*)}/g.exec(template);
-    }
-
-    let actionTags: string;
-    let actionText: string;
-    let actionName: string;
-    let action: string;
-
-    match = linkActionRegex.exec(template);
-    while (match !== null) {
-      [actionTags, actionName, actionText] = match;
-      action = createLinkElement(actionName, actionText);
-      template = template.split(actionTags).join(action);
-      match = linkActionRegex.exec(template);
-    }
-
-    match = buttonActionRegex.exec(template);
-    while (match !== null) {
-      [actionTags, actionName, actionText] = match;
-      action = createButtonElement(actionName, actionText);
-      template = template.split(actionTags).join(action);
-      match = buttonActionRegex.exec(template);
-    }
-
-    const compiled = _.template(template);
-    res = compiled(data);
-  } catch (ex) {
-    console.log(ex, template)
+    const parseData = JSON.parse(data);
+    return !Array.isArray(parseData);
+  } catch (e) {
+    return false;
   }
-  return res;
 }
 
-export const parseWithTranslation = {
+export interface LabelSettings {
+  showLabel: boolean;
+  useLabelFunction: boolean;
+  parsedLabelFunction: GenericFunction;
+  label: string;
+}
 
-  translateFn: null,
-
-  translate(key: string, defaultTranslation?: string): string {
-    if (this.translateFn) {
-      return this.translateFn(key, defaultTranslation);
+export function entitiesParseName(entities: FormattedData[], labelSettings: LabelSettings):  FormattedData[] {
+  const div = document.createElement('div');
+  for (const entity of entities) {
+    if (labelSettings?.showLabel) {
+      const pattern = labelSettings.useLabelFunction ? safeExecute(labelSettings.parsedLabelFunction,
+        [entity, entities, entity.dsIndex]) : labelSettings.label;
+      const markerLabelText = parseWithTranslation.prepareProcessPattern(pattern, true);
+      const replaceInfoLabelMarker = processDataPattern(pattern, entity);
+      div.innerHTML = fillDataPattern(markerLabelText, replaceInfoLabelMarker, entity);
+      entity.entityParseName = div.textContent || div.innerText || '';
     } else {
-      throw console.error('Translate not assigned');
-    }
-  },
-  parseTemplate(template: string, data: object, forceTranslate = false): string {
-    return parseTemplate(forceTranslate ? this.translate(template) : template, data, this.translate.bind(this));
-  },
-  setTranslate(translateFn: TranslateFunc) {
-    this.translateFn = translateFn;
-  }
-}
-
-export function parseData(input: DatasourceData[]): FormattedData[] {
-  return _(input).groupBy(el => el?.datasource?.entityName)
-    .values().value().map((entityArray, i) => {
-      const obj: FormattedData = {
-        entityName: entityArray[0]?.datasource?.entityName,
-        entityId: entityArray[0]?.datasource?.entityId,
-        entityType: entityArray[0]?.datasource?.entityType,
-        $datasource: entityArray[0]?.datasource,
-        dsIndex: i,
-        deviceType: null
-      };
-      entityArray.filter(el => el.data.length).forEach(el => {
-        const indexDate = el?.data?.length ? el.data.length - 1 : 0;
-        obj[el?.dataKey?.label] = el?.data[indexDate][0] ? el?.data[indexDate][1] : null;
-        obj[el?.dataKey?.label + '|ts'] = el?.data[indexDate][0] || null;
-        if (el?.dataKey?.label === 'type') {
-          obj.deviceType = el?.data[indexDate][1];
-        }
-      });
-      return obj;
-    });
-}
-
-export function parseArray(input: DatasourceData[]): FormattedData[][] {
-  return _(input).groupBy(el => el?.datasource?.entityName)
-    .values().value().map((entityArray, dsIndex) =>
-      entityArray[0].data.map((el, i) => {
-        const obj: FormattedData = {
-          entityName: entityArray[0]?.datasource?.entityName,
-          entityId: entityArray[0]?.datasource?.entityId,
-          entityType: entityArray[0]?.datasource?.entityType,
-          $datasource: entityArray[0]?.datasource,
-          dsIndex: i,
-          time: el[0],
-          deviceType: null
-        };
-        entityArray.filter(e => e.data.length && e.data[i]).forEach(entity => {
-          obj[entity?.dataKey?.label] = entity?.data[i][1];
-          obj[entity?.dataKey?.label + '|ts'] = entity?.data[0][0];
-          if (entity?.dataKey?.label === 'type') {
-            obj.deviceType = entity?.data[0][1];
-          }
-        });
-        return obj;
-      })
-    );
-}
-
-export function parseFunction(source: any, params: string[] = ['def']): (...args: any[]) => any {
-  let res = null;
-  if (source?.length) {
-    try {
-      res = new Function(...params, source);
-    }
-    catch (err) {
-      res = null;
+      entity.entityParseName = entity.entityName;
     }
   }
-  return res;
+  return entities;
 }
 
-export function safeExecute(func: (...args: any[]) => any, params = []) {
-  let res = null;
-  if (func && typeof (func) === 'function') {
-    try {
-      res = func(...params);
-    }
-    catch (err) {
-      console.log('error in external function:', err);
-      res = null;
-    }
-  }
-  return res;
-}
+export const isValidLatitude = (latitude: any): boolean =>
+  isDefinedAndNotNull(latitude) &&
+  !isString(latitude) &&
+  !isNaN(latitude) && isFinite(latitude) && Math.abs(latitude) <= 90;
 
-export function calculateNewPointCoordinate(coordinate: number, imageSize: number): number {
-  let pointCoordinate = coordinate / imageSize;
-  if (pointCoordinate < 0) {
-    pointCoordinate = 0;
-  } else if (pointCoordinate > 1) {
-    pointCoordinate = 1;
-  }
-  return pointCoordinate;
-}
+export const isValidLongitude = (longitude: any): boolean =>
+  isDefinedAndNotNull(longitude) &&
+  !isString(longitude) &&
+  !isNaN(longitude) && isFinite(longitude) && Math.abs(longitude) <= 180;
+
+export const isValidLatLng = (latitude: any, longitude: any): boolean =>
+  isValidLatitude(latitude) && isValidLongitude(longitude);

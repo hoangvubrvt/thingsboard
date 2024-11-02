@@ -1,5 +1,5 @@
 /*
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 import * as React from 'react';
 import JsonFormUtils from './json-form-utils';
 import ThingsboardBaseComponent from './json-form-base-component';
-import Button from '@material-ui/core/Button';
+import Button from '@mui/material/Button';
 import _ from 'lodash';
-import IconButton from '@material-ui/core/IconButton';
-import ClearIcon from '@material-ui/icons/Clear';
-import AddIcon from '@material-ui/icons/Add';
-import Tooltip from '@material-ui/core/Tooltip';
+import IconButton from '@mui/material/IconButton';
+import Clear from '@mui/icons-material/Clear';
+import Add from '@mui/icons-material/Add';
+import Tooltip from '@mui/material/Tooltip';
 import {
   JsonFormData,
   JsonFormFieldProps,
@@ -35,7 +35,7 @@ interface ThingsboardArrayState extends JsonFormFieldState {
 
 class ThingsboardArray extends React.Component<JsonFormFieldProps, ThingsboardArrayState> {
 
-    constructor(props) {
+    constructor(props: JsonFormFieldProps) {
         super(props);
         this.onAppend = this.onAppend.bind(this);
         this.onDelete = this.onDelete.bind(this);
@@ -130,20 +130,19 @@ class ThingsboardArray extends React.Component<JsonFormFieldProps, ThingsboardAr
 
     render() {
         const arrays = [];
-        const fields = [];
         const model = this.state.model;
         const keys = this.state.keys;
-        const items = this.props.form.items;
         for (let i = 0; i < model.length; i++ ) {
-            let removeButton: JSX.Element = null;
+            let removeButton: React.JSX.Element = null;
             if (!this.props.form.readonly) {
                 const boundOnDelete = this.onDelete.bind(this, i);
-                removeButton = <Tooltip title='Remove'><IconButton onClick={boundOnDelete}><ClearIcon/></IconButton></Tooltip>;
+                removeButton = <Tooltip title='Remove'><IconButton onClick={boundOnDelete}><Clear/></IconButton></Tooltip>;
             }
             const forms = (this.props.form.items as JsonFormData[]).map((form, index) => {
                 const copy = this.copyWithIndex(form, i);
                 return this.props.builder(copy, this.props.model, index, this.props.onChange,
-                  this.props.onColorClick, this.props.onIconClick, this.props.onToggleFullscreen, this.props.mapper);
+                  this.props.onColorClick, this.props.onIconClick, this.props.onToggleFullscreen,
+                  this.props.onHelpClick, this.props.mapper);
             });
             arrays.push(
             <li key={keys[i]} className='list-group-item'>
@@ -156,7 +155,7 @@ class ThingsboardArray extends React.Component<JsonFormFieldProps, ThingsboardAr
         if (!this.props.form.readonly) {
             addButton = <Button variant='contained'
                                 color='primary'
-                                startIcon={<AddIcon/>}
+                                startIcon={<Add/>}
                                 style={{marginBottom: '8px'}}
                                 onClick={this.onAppend}>{this.props.form.add || 'New'}</Button>;
         }

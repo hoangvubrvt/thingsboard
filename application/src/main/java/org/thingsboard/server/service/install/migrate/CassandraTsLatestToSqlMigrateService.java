@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,27 @@
 package org.thingsboard.server.service.install.migrate;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.UUIDConverter;
 import org.thingsboard.server.dao.cassandra.CassandraCluster;
-import org.thingsboard.server.dao.model.sqlts.dictionary.TsKvDictionary;
-import org.thingsboard.server.dao.model.sqlts.dictionary.TsKvDictionaryCompositeKey;
+import org.thingsboard.server.dao.model.sqlts.dictionary.KeyDictionaryCompositeKey;
+import org.thingsboard.server.dao.model.sqlts.dictionary.KeyDictionaryEntry;
 import org.thingsboard.server.dao.model.sqlts.latest.TsKvLatestEntity;
-import org.thingsboard.server.dao.sqlts.dictionary.TsKvDictionaryRepository;
+import org.thingsboard.server.dao.sqlts.dictionary.KeyDictionaryRepository;
 import org.thingsboard.server.dao.sqlts.insert.latest.InsertLatestTsRepository;
-import org.thingsboard.server.dao.util.NoSqlAnyDao;
-import org.thingsboard.server.service.install.EntityDatabaseSchemaService;
+import org.thingsboard.server.dao.util.NoSqlTsDao;
+import org.thingsboard.server.dao.util.SqlTsLatestDao;
+import org.thingsboard.server.service.install.InstallScripts;
 
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.Arrays;
@@ -51,14 +56,15 @@ import static org.thingsboard.server.service.install.migrate.CassandraToSqlColum
 
 @Service
 @Profile("install")
-@NoSqlAnyDao
+@NoSqlTsDao
+@SqlTsLatestDao
 @Slf4j
 public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateService {
 
-    private static final int LATEST_KEY_LENGTH = 255;
+    private static final int MAX_KEY_LENGTH = 255;
+    private static final int MAX_STR_V_LENGTH = 10000000;
 
-    @Autowired
-    private EntityDatabaseSchemaService entityDatabaseSchemaService;
+    private static final String SQL_DIR = "sql";
 
     @Autowired
     private InsertLatestTsRepository insertLatestTsRepository;
@@ -67,7 +73,10 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
     protected CassandraCluster cluster;
 
     @Autowired
-    protected TsKvDictionaryRepository dictionaryRepository;
+    protected KeyDictionaryRepository keyDictionaryRepository;
+
+    @Autowired
+    private InstallScripts installScripts;
 
     @Value("${spring.datasource.url}")
     protected String dbUrl;
@@ -85,8 +94,9 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
     @Override
     public void migrate() throws Exception {
         log.info("Performing migration of latest timeseries data from cassandra to SQL database ...");
-        entityDatabaseSchemaService.createDatabaseSchema(false);
         try (Connection conn = DriverManager.getConnection(dbUrl, dbUserName, dbPassword)) {
+            Path schemaUpdateFile = Paths.get(installScripts.getDataDir(), SQL_DIR, "schema-ts-latest-psql.sql");
+            loadSql(schemaUpdateFile, conn);
             conn.setAutoCommit(false);
             for (CassandraToSqlTable table : tables) {
                 table.migrateToSql(cluster.getSession(), conn);
@@ -95,11 +105,10 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
             log.error("Unexpected error during ThingsBoard entities data migration!", e);
             throw e;
         }
-        entityDatabaseSchemaService.createDatabaseIndexes();
     }
 
     private List<CassandraToSqlTable> tables = Arrays.asList(
-            new CassandraToSqlTable("ts_kv_latest_cf",
+            new CassandraToSqlTable("ts_kv_latest_cf", "ts_kv_latest",
                     idColumn("entity_id"),
                     stringColumn("key"),
                     bigintColumn("ts"),
@@ -129,6 +138,12 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
 
         String strV = data[4].getValue();
         if (strV != null) {
+            if (strV.length() > MAX_STR_V_LENGTH) {
+                log.warn("[ts_kv_latest] Value size [{}] exceeds maximum size [{}] of column [str_v] and will be truncated!",
+                        strV.length(), MAX_STR_V_LENGTH);
+                log.warn("Affected data:\n{}", strV);
+                strV = strV.substring(0, MAX_STR_V_LENGTH);
+            }
             latestEntity.setStrValue(strV);
         } else {
             Long longV = null;
@@ -170,29 +185,31 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
     }
 
     protected Integer getOrSaveKeyId(String strKey) {
-        if (strKey.length() > LATEST_KEY_LENGTH) {
-            log.warn("Key is long. Max key length is 255\n{}", strKey);
-            strKey = strKey.substring(0, LATEST_KEY_LENGTH);
+        if (strKey.length() > MAX_KEY_LENGTH) {
+            log.warn("[ts_kv_latest] Value size [{}] exceeds maximum size [{}] of column [key] and will be truncated!",
+                    strKey.length(), MAX_KEY_LENGTH);
+            log.warn("Affected data:\n{}", strKey);
+            strKey = strKey.substring(0, MAX_KEY_LENGTH);
         }
 
         Integer keyId = tsKvDictionaryMap.get(strKey);
         if (keyId == null) {
-            Optional<TsKvDictionary> tsKvDictionaryOptional;
-            tsKvDictionaryOptional = dictionaryRepository.findById(new TsKvDictionaryCompositeKey(strKey));
+            Optional<KeyDictionaryEntry> tsKvDictionaryOptional;
+            tsKvDictionaryOptional = keyDictionaryRepository.findById(new KeyDictionaryCompositeKey(strKey));
             if (!tsKvDictionaryOptional.isPresent()) {
                 tsCreationLock.lock();
                 try {
-                    tsKvDictionaryOptional = dictionaryRepository.findById(new TsKvDictionaryCompositeKey(strKey));
+                    tsKvDictionaryOptional = keyDictionaryRepository.findById(new KeyDictionaryCompositeKey(strKey));
                     if (!tsKvDictionaryOptional.isPresent()) {
-                        TsKvDictionary tsKvDictionary = new TsKvDictionary();
-                        tsKvDictionary.setKey(strKey);
+                        KeyDictionaryEntry keyDictionaryEntry = new KeyDictionaryEntry();
+                        keyDictionaryEntry.setKey(strKey);
                         try {
-                            TsKvDictionary saved = dictionaryRepository.save(tsKvDictionary);
+                            KeyDictionaryEntry saved = keyDictionaryRepository.save(keyDictionaryEntry);
                             tsKvDictionaryMap.put(saved.getKey(), saved.getKeyId());
                             keyId = saved.getKeyId();
                         } catch (ConstraintViolationException e) {
-                            tsKvDictionaryOptional = dictionaryRepository.findById(new TsKvDictionaryCompositeKey(strKey));
-                            TsKvDictionary dictionary = tsKvDictionaryOptional.orElseThrow(() -> new RuntimeException("Failed to get TsKvDictionary entity from DB!"));
+                            tsKvDictionaryOptional = keyDictionaryRepository.findById(new KeyDictionaryCompositeKey(strKey));
+                            KeyDictionaryEntry dictionary = tsKvDictionaryOptional.orElseThrow(() -> new RuntimeException("Failed to get TsKvDictionary entity from DB!"));
                             tsKvDictionaryMap.put(dictionary.getKey(), dictionary.getKeyId());
                             keyId = dictionary.getKeyId();
                         }
@@ -208,5 +225,11 @@ public class CassandraTsLatestToSqlMigrateService implements TsLatestMigrateServ
             }
         }
         return keyId;
+    }
+
+    private void loadSql(Path sqlFile, Connection conn) throws Exception {
+        String sql = new String(Files.readAllBytes(sqlFile), Charset.forName("UTF-8"));
+        conn.createStatement().execute(sql); //NOSONAR, ignoring because method used to execute thingsboard database upgrade script
+        Thread.sleep(5000);
     }
 }

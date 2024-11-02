@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,14 @@
  */
 package org.thingsboard.server.actors;
 
-import lombok.Data;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.thingsboard.server.common.data.EntityType;
+import org.thingsboard.server.common.msg.MsgType;
+import org.thingsboard.server.common.msg.TbActorError;
 import org.thingsboard.server.common.msg.TbActorMsg;
+import org.thingsboard.server.common.msg.TbActorStopReason;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -27,7 +32,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 @Slf4j
-@Data
+@Getter
+@RequiredArgsConstructor
 public final class TbActorMailbox implements TbActorCtx {
     private static final boolean HIGH_PRIORITY = true;
     private static final boolean NORMAL_PRIORITY = false;
@@ -49,6 +55,7 @@ public final class TbActorMailbox implements TbActorCtx {
     private final AtomicBoolean busy = new AtomicBoolean(FREE);
     private final AtomicBoolean ready = new AtomicBoolean(NOT_READY);
     private final AtomicBoolean destroyInProgress = new AtomicBoolean();
+    private volatile TbActorStopReason stopReason;
 
     public void initActor() {
         dispatcher.getExecutor().execute(() -> tryInit(1));
@@ -65,12 +72,18 @@ public final class TbActorMailbox implements TbActorCtx {
                 }
             }
         } catch (Throwable t) {
-            log.debug("[{}] Failed to init actor, attempt: {}", selfId, attempt, t);
+            InitFailureStrategy strategy;
             int attemptIdx = attempt + 1;
-            InitFailureStrategy strategy = actor.onInitFailure(attempt, t);
+            if (isUnrecoverable(t)) {
+                strategy = InitFailureStrategy.stop();
+            } else {
+                log.debug("[{}] Failed to init actor, attempt: {}", selfId, attempt, t);
+                strategy = actor.onInitFailure(attempt, t);
+            }
             if (strategy.isStop() || (settings.getMaxActorInitAttempts() > 0 && attemptIdx > settings.getMaxActorInitAttempts())) {
                 log.info("[{}] Failed to init actor, attempt {}, going to stop attempts.", selfId, attempt, t);
-                system.stop(selfId);
+                stopReason = TbActorStopReason.INIT_FAILED;
+                destroy(t.getCause());
             } else if (strategy.getRetryDelay() > 0) {
                 log.info("[{}] Failed to init actor, attempt {}, going to retry in attempts in {}ms", selfId, attempt, strategy.getRetryDelay());
                 log.debug("[{}] Error", selfId, t);
@@ -83,13 +96,36 @@ public final class TbActorMailbox implements TbActorCtx {
         }
     }
 
-    private void enqueue(TbActorMsg msg, boolean highPriority) {
-        if (highPriority) {
-            highPriorityMsgs.add(msg);
-        } else {
-            normalPriorityMsgs.add(msg);
+    private static boolean isUnrecoverable(Throwable t) {
+        if (t instanceof TbActorException && t.getCause() != null) {
+            t = t.getCause();
         }
-        tryProcessQueue(true);
+        return t instanceof TbActorError && ((TbActorError) t).isUnrecoverable();
+    }
+
+    private void enqueue(TbActorMsg msg, boolean highPriority) {
+        if (!destroyInProgress.get()) {
+            if (highPriority) {
+                highPriorityMsgs.add(msg);
+            } else {
+                normalPriorityMsgs.add(msg);
+            }
+            tryProcessQueue(true);
+        } else {
+            if (highPriority && msg.getMsgType().equals(MsgType.RULE_NODE_UPDATED_MSG)) {
+                synchronized (this) {
+                    if (stopReason == TbActorStopReason.INIT_FAILED) {
+                        destroyInProgress.set(false);
+                        stopReason = null;
+                        initActor();
+                    } else {
+                        msg.onTbActorStopped(stopReason);
+                    }
+                }
+            } else {
+                msg.onTbActorStopped(stopReason);
+            }
+        }
     }
 
     private void tryProcessQueue(boolean newMsg) {
@@ -119,9 +155,12 @@ public final class TbActorMailbox implements TbActorCtx {
                 try {
                     log.debug("[{}] Going to process message: {}", selfId, msg);
                     actor.process(msg);
+                } catch (TbRuleNodeUpdateException updateException) {
+                    stopReason = TbActorStopReason.INIT_FAILED;
+                    destroy(updateException.getCause());
                 } catch (Throwable t) {
                     log.debug("[{}] Failed to process message: {}", selfId, msg, t);
-                    ProcessFailureStrategy strategy = actor.onProcessFailure(t);
+                    ProcessFailureStrategy strategy = actor.onProcessFailure(msg, t);
                     if (strategy.isStop()) {
                         system.stop(selfId);
                     }
@@ -151,7 +190,17 @@ public final class TbActorMailbox implements TbActorCtx {
 
     @Override
     public void broadcastToChildren(TbActorMsg msg) {
-        system.broadcastToChildren(selfId, msg);
+        broadcastToChildren(msg, false);
+    }
+
+    @Override
+    public void broadcastToChildren(TbActorMsg msg, boolean highPriority) {
+        system.broadcastToChildren(selfId, msg, highPriority);
+    }
+
+    @Override
+    public void broadcastToChildrenByType(TbActorMsg msg, EntityType entityType) {
+        broadcastToChildren(msg, actorId -> entityType.equals(actorId.getEntityType()));
     }
 
     @Override
@@ -170,23 +219,28 @@ public final class TbActorMailbox implements TbActorCtx {
     }
 
     @Override
-    public TbActorRef getOrCreateChildActor(TbActorId actorId, Supplier<String> dispatcher, Supplier<TbActorCreator> creator) {
+    public TbActorRef getOrCreateChildActor(TbActorId actorId, Supplier<String> dispatcher, Supplier<TbActorCreator> creator, Supplier<Boolean> createCondition) {
         TbActorRef actorRef = system.getActor(actorId);
-        if (actorRef == null) {
+        if (actorRef == null && createCondition.get()) {
             return system.createChildActor(dispatcher.get(), creator.get(), selfId);
         } else {
             return actorRef;
         }
     }
 
-    public void destroy() {
+    public void destroy(Throwable cause) {
+        if (stopReason == null) {
+            stopReason = TbActorStopReason.STOPPED;
+        }
         destroyInProgress.set(true);
         dispatcher.getExecutor().execute(() -> {
             try {
                 ready.set(NOT_READY);
-                actor.destroy();
+                actor.destroy(stopReason, cause);
+                highPriorityMsgs.forEach(msg -> msg.onTbActorStopped(stopReason));
+                normalPriorityMsgs.forEach(msg -> msg.onTbActorStopped(stopReason));
             } catch (Throwable t) {
-                log.warn("[{}] Failed to destroy actor: {}", selfId, t);
+                log.warn("[{}] Failed to destroy actor: ", selfId, t);
             }
         });
     }

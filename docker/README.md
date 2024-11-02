@@ -17,6 +17,14 @@ In order to set database type change the value of `DATABASE` variable in `.env` 
 
 **NOTE**: According to the database type corresponding docker service will be deployed (see `docker-compose.postgres.yml`, `docker-compose.hybrid.yml` for details).
 
+In order to set cache type change the value of `CACHE` variable in `.env` file to one of the following:
+
+- `redis` - use Redis standalone cache (1 node - 1 master);
+- `redis-cluster` - use Redis cluster cache (6 nodes - 3 masters, 3 slaves);
+- `redis-sentinel` - use Redis sentinel cache (3 nodes - 1 master, 1 slave, 1 sentinel)
+
+**NOTE**: According to the cache type corresponding docker service will be deployed (see `docker-compose.redis.yml`, `docker-compose.redis-cluster.yml`, `docker-compose.redis-sentinel.yml` for details).
+
 Execute the following command to create log folders for the services and chown of these folders to the docker container users. 
 To be able to change user, **chown** command is used, which requires sudo permissions (script will request password for a sudo access): 
 
@@ -58,7 +66,7 @@ In case of any issues you can examine service logs for errors.
 For example to see ThingsBoard node logs execute the following command:
 
 `
-$ docker-compose logs -f tb-core1 tb-rule-engine1
+$ docker-compose logs -f tb-core1 tb-core2 tb-rule-engine1 tb-rule-engine2 tb-mqtt-transport1 tb-mqtt-transport2
 `
 
 Or use `docker-compose ps` to see the state of all the containers.
@@ -100,3 +108,13 @@ $ ./docker-start-services.sh
 Where:
 
 - `FROM_VERSION` - from which version upgrade should be started. See [Upgrade Instructions](https://thingsboard.io/docs/user-guide/install/upgrade-instructions) for valid `fromVersion` values.
+
+
+## Monitoring
+
+If you want to enable monitoring with Prometheus and Grafana you need to set <b>MONITORING_ENABLED</b> environment variable to <b>true</b>.
+After this Prometheus and Grafana containers will be deployed. You can reach Prometheus at `http://localhost:9090` and Grafana at `http://localhost:3000` (default login is `admin` and password `foobar`).
+To change Grafana password you need to update `GF_SECURITY_ADMIN_PASSWORD` environment variable at `./monitoring/grafana/config.monitoring` file.
+Dashboards are loaded from `./monitoring/grafana/provisioning/dashboards` directory.
+
+If you want to add new monitoring jobs for Prometheus update `./monitoring/prometheus/prometheus.yml` file.

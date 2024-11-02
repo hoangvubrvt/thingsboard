@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,13 @@ package org.thingsboard.server.common.stats;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
+import org.apache.commons.lang3.ArrayUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.thingsboard.server.common.data.StringUtils;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -40,13 +44,29 @@ public class DefaultStatsFactory implements StatsFactory {
     @Value("${metrics.enabled:false}")
     private Boolean metricsEnabled;
 
+    @Value("${metrics.timer.percentiles:0.5}")
+    private String timerPercentilesStr;
+
+    private double[] timerPercentiles;
+
+    @PostConstruct
+    public void init() {
+        if (!StringUtils.isEmpty(timerPercentilesStr)) {
+            String[] split = timerPercentilesStr.split(",");
+            timerPercentiles = new double[split.length];
+            for (int i = 0; i < split.length; i++) {
+                timerPercentiles[i] = Double.parseDouble(split[i]);
+            }
+        }
+    }
+
+
     @Override
-    public StatsCounter createStatsCounter(String key, String statsName) {
+    public StatsCounter createStatsCounter(String key, String statsName, String... otherTags) {
+        String[] tags = getTags(statsName, otherTags);
         return new StatsCounter(
                 new AtomicInteger(0),
-                metricsEnabled ?
-                        meterRegistry.counter(key, STATS_NAME_TAG, statsName)
-                        : STUB_COUNTER,
+                metricsEnabled ? meterRegistry.counter(key, tags) : STUB_COUNTER,
                 statsName
         );
     }
@@ -74,9 +94,39 @@ public class DefaultStatsFactory implements StatsFactory {
         return new DefaultMessagesStats(totalCounter, successfulCounter, failedCounter);
     }
 
+    @Override
+    public Timer createTimer(String key, String... tags) {
+        Timer.Builder timerBuilder = Timer.builder(key)
+                .tags(tags)
+                .publishPercentiles();
+        if (timerPercentiles != null && timerPercentiles.length > 0) {
+            timerBuilder.publishPercentiles(timerPercentiles);
+        }
+        return timerBuilder.register(meterRegistry);
+    }
+
+    @Override
+    public StatsTimer createTimer(StatsType type, String name, String... tags) {
+        return new StatsTimer(name, Timer.builder(type.getName())
+                .tags(getTags(name, tags))
+                .register(meterRegistry));
+    }
+
+    private static String[] getTags(String statsName, String[] otherTags) {
+        String[] tags = new String[]{STATS_NAME_TAG, statsName};
+        if (otherTags.length > 0) {
+            if (otherTags.length % 2 != 0) {
+                throw new IllegalArgumentException("Invalid tags array size");
+            }
+            tags = ArrayUtils.addAll(tags, otherTags);
+        }
+        return tags;
+    }
+
     private static class StubCounter implements Counter {
         @Override
-        public void increment(double amount) {}
+        public void increment(double amount) {
+        }
 
         @Override
         public double count() {

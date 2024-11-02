@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,40 +14,42 @@
 /// limitations under the License.
 ///
 
-import L, { PolylineDecoratorOptions } from 'leaflet';
+// @ts-ignore
+import L, { PolylineDecorator, PolylineDecoratorOptions, Symbol } from 'leaflet';
 import 'leaflet-polylinedecorator';
 
-import { FormattedData, PolylineSettings } from './map-models';
-import { safeExecute } from '@home/components/widget/lib/maps/maps-utils';
+import { WidgetPolylineSettings } from './map-models';
+import { functionValueCalculator } from '@home/components/widget/lib/maps/common-maps-utils';
+import { FormattedData } from '@shared/models/widget.models';
 
 export class Polyline {
 
   leafletPoly: L.Polyline;
-  polylineDecorator: L.PolylineDecorator;
-  dataSources: FormattedData[];
-  data: FormattedData;
+  polylineDecorator: PolylineDecorator;
 
-  constructor(private map: L.Map, locations: L.LatLng[], data: FormattedData, dataSources: FormattedData[], settings: PolylineSettings) {
-    this.dataSources = dataSources;
-    this.data = data;
+  constructor(private map: L.Map,
+              locations: L.LatLng[],
+              private data: FormattedData,
+              private dataSources: FormattedData[],
+              settings: Partial<WidgetPolylineSettings>) {
 
     this.leafletPoly = L.polyline(locations,
       this.getPolyStyle(settings)
     ).addTo(this.map);
 
     if (settings.usePolylineDecorator) {
-      this.polylineDecorator = L.polylineDecorator(this.leafletPoly, this.getDecoratorSettings(settings)).addTo(this.map);
+      this.polylineDecorator = new PolylineDecorator(this.leafletPoly, this.getDecoratorSettings(settings)).addTo(this.map);
     }
   }
 
-  getDecoratorSettings(settings: PolylineSettings): PolylineDecoratorOptions {
+  getDecoratorSettings(settings: Partial<WidgetPolylineSettings>): PolylineDecoratorOptions {
     return {
       patterns: [
         {
           offset: settings.decoratorOffset,
           endOffset: settings.endDecoratorOffset,
           repeat: settings.decoratorRepeat,
-          symbol: L.Symbol[settings.decoratorSymbol]({
+          symbol: Symbol[settings.decoratorSymbol]({
             pixelSize: settings.decoratorSymbolSize,
             polygon: false,
             pathOptions: {
@@ -57,31 +59,30 @@ export class Polyline {
           })
         }
       ]
-    }
+    };
   }
 
-  updatePolyline(locations: L.LatLng[], data: FormattedData, dataSources: FormattedData[], settings: PolylineSettings) {
+  updatePolyline(locations: L.LatLng[], data: FormattedData, dataSources: FormattedData[], settings: Partial<WidgetPolylineSettings>) {
     this.data = data;
     this.dataSources = dataSources;
     this.leafletPoly.setLatLngs(locations);
     this.leafletPoly.setStyle(this.getPolyStyle(settings));
-    if (this.polylineDecorator)
+    if (this.polylineDecorator) {
       this.polylineDecorator.setPaths(this.leafletPoly);
+    }
   }
 
-  getPolyStyle(settings: PolylineSettings): L.PolylineOptions {
+  getPolyStyle(settings: Partial<WidgetPolylineSettings>): L.PolylineOptions {
     return {
       interactive: false,
-      color: settings.useColorFunction ?
-        safeExecute(settings.colorFunction,
-          [this.data, this.dataSources, this.data.dsIndex]) : settings.color,
-      opacity: settings.useStrokeOpacityFunction ?
-        safeExecute(settings.strokeOpacityFunction,
-          [this.data, this.dataSources, this.data.dsIndex]) : settings.strokeOpacity,
-      weight: settings.useStrokeWeightFunction ?
-        safeExecute(settings.strokeWeightFunction,
-          [this.data, this.dataSources, this.data.dsIndex]) : settings.strokeWeight,
-    }
+      color: functionValueCalculator(settings.useColorFunction, settings.parsedColorFunction,
+        [this.data, this.dataSources, this.data.dsIndex], settings.color),
+      opacity: functionValueCalculator(settings.useStrokeOpacityFunction, settings.parsedStrokeOpacityFunction,
+        [this.data, this.dataSources, this.data.dsIndex], settings.strokeOpacity),
+      weight: functionValueCalculator(settings.useStrokeWeightFunction, settings.parsedStrokeWeightFunction,
+        [this.data, this.dataSources, this.data.dsIndex], settings.strokeWeight),
+      pmIgnore: true
+    };
   }
 
   removePolyline() {

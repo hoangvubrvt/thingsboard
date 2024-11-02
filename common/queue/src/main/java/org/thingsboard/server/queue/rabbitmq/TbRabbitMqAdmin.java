@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,16 @@ package org.thingsboard.server.queue.rabbitmq;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.thingsboard.server.queue.TbQueueAdmin;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 @Slf4j
+@Deprecated(forRemoval = true, since = "3.9") // for removal in 4.0
 public class TbRabbitMqAdmin implements TbQueueAdmin {
 
     private final Channel channel;
@@ -50,11 +53,25 @@ public class TbRabbitMqAdmin implements TbQueueAdmin {
     }
 
     @Override
-    public void createTopicIfNotExists(String topic) {
+    public void createTopicIfNotExists(String topic, String properties) {
+        Map<String, Object> arguments = this.arguments;
+        if (StringUtils.isNotBlank(properties)) {
+            arguments = new HashMap<>(arguments);
+            arguments.putAll(TbRabbitMqQueueArguments.getArgs(properties));
+        }
         try {
             channel.queueDeclare(topic, false, false, false, arguments);
         } catch (IOException e) {
             log.error("Failed to bind queue: [{}]", topic, e);
+        }
+    }
+
+    @Override
+    public void deleteTopic(String topic) {
+        try {
+            channel.queueDelete(topic);
+        } catch (IOException e) {
+            log.error("Failed to delete RabbitMq queue [{}].", topic);
         }
     }
 

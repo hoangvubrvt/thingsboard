@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,40 +15,46 @@
  */
 package org.thingsboard.server.dao.entity;
 
-import com.google.common.base.Function;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
+import org.thingsboard.server.common.data.EntityType;
+import org.thingsboard.server.common.data.HasCustomerId;
+import org.thingsboard.server.common.data.HasEmail;
+import org.thingsboard.server.common.data.HasLabel;
 import org.thingsboard.server.common.data.HasName;
-import org.thingsboard.server.common.data.id.AlarmId;
-import org.thingsboard.server.common.data.id.AssetId;
+import org.thingsboard.server.common.data.HasTitle;
+import org.thingsboard.server.common.data.StringUtils;
 import org.thingsboard.server.common.data.id.CustomerId;
-import org.thingsboard.server.common.data.id.DashboardId;
-import org.thingsboard.server.common.data.id.DeviceId;
 import org.thingsboard.server.common.data.id.EntityId;
-import org.thingsboard.server.common.data.id.EntityViewId;
-import org.thingsboard.server.common.data.id.RuleChainId;
+import org.thingsboard.server.common.data.id.HasId;
+import org.thingsboard.server.common.data.id.NameLabelAndCustomerDetails;
 import org.thingsboard.server.common.data.id.TenantId;
-import org.thingsboard.server.common.data.id.UserId;
 import org.thingsboard.server.common.data.page.PageData;
 import org.thingsboard.server.common.data.query.EntityCountQuery;
 import org.thingsboard.server.common.data.query.EntityData;
 import org.thingsboard.server.common.data.query.EntityDataPageLink;
 import org.thingsboard.server.common.data.query.EntityDataQuery;
-import org.thingsboard.server.dao.alarm.AlarmService;
-import org.thingsboard.server.dao.asset.AssetService;
-import org.thingsboard.server.dao.customer.CustomerService;
-import org.thingsboard.server.dao.dashboard.DashboardService;
-import org.thingsboard.server.dao.device.DeviceService;
-import org.thingsboard.server.dao.entityview.EntityViewService;
+import org.thingsboard.server.common.data.query.EntityFilterType;
+import org.thingsboard.server.common.data.query.EntityKey;
+import org.thingsboard.server.common.data.query.EntityListFilter;
+import org.thingsboard.server.common.data.query.KeyFilter;
+import org.thingsboard.server.common.data.query.RelationsQueryFilter;
 import org.thingsboard.server.dao.exception.IncorrectParameterException;
-import org.thingsboard.server.dao.rule.RuleChainService;
-import org.thingsboard.server.dao.tenant.TenantService;
-import org.thingsboard.server.dao.user.UserService;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import static org.thingsboard.server.common.data.id.EntityId.NULL_UUID;
+import static org.thingsboard.server.dao.service.Validator.validateEntityDataPageLink;
 import static org.thingsboard.server.dao.service.Validator.validateId;
 
 /**
@@ -60,47 +66,24 @@ public class BaseEntityService extends AbstractEntityService implements EntitySe
 
     public static final String INCORRECT_TENANT_ID = "Incorrect tenantId ";
     public static final String INCORRECT_CUSTOMER_ID = "Incorrect customerId ";
+    public static final CustomerId NULL_CUSTOMER_ID = new CustomerId(NULL_UUID);
 
-    @Autowired
-    private AssetService assetService;
-
-    @Autowired
-    private DeviceService deviceService;
-
-    @Autowired
-    private EntityViewService entityViewService;
-
-    @Autowired
-    private TenantService tenantService;
-
-    @Autowired
-    private CustomerService customerService;
-
-    @Autowired
-    private UserService userService;
-
-    @Autowired
-    private DashboardService dashboardService;
-
-    @Autowired
-    private AlarmService alarmService;
-
-    @Autowired
-    private RuleChainService ruleChainService;
+    private static final int MAX_ENTITY_IDS_SIZE = 1024;
+    private static final Set<EntityFilterType> EXCLUDED_TYPES_FROM_OPTIMIZATION = Set.of(
+            EntityFilterType.ENTITY_LIST, EntityFilterType.SINGLE_ENTITY, EntityFilterType.RELATIONS_QUERY);
 
     @Autowired
     private EntityQueryDao entityQueryDao;
 
-    @Override
-    public void deleteEntityRelations(TenantId tenantId, EntityId entityId) {
-        super.deleteEntityRelations(tenantId, entityId);
-    }
+    @Autowired
+    @Lazy
+    EntityServiceRegistry entityServiceRegistry;
 
     @Override
     public long countEntitiesByQuery(TenantId tenantId, CustomerId customerId, EntityCountQuery query) {
         log.trace("Executing countEntitiesByQuery, tenantId [{}], customerId [{}], query [{}]", tenantId, customerId, query);
-        validateId(tenantId, INCORRECT_TENANT_ID + tenantId);
-        validateId(customerId, INCORRECT_CUSTOMER_ID + customerId);
+        validateId(tenantId, id -> INCORRECT_TENANT_ID + id);
+        validateId(customerId, id -> INCORRECT_CUSTOMER_ID + id);
         validateEntityCountQuery(query);
         return this.entityQueryDao.countEntitiesByQuery(tenantId, customerId, query);
     }
@@ -108,51 +91,88 @@ public class BaseEntityService extends AbstractEntityService implements EntitySe
     @Override
     public PageData<EntityData> findEntityDataByQuery(TenantId tenantId, CustomerId customerId, EntityDataQuery query) {
         log.trace("Executing findEntityDataByQuery, tenantId [{}], customerId [{}], query [{}]", tenantId, customerId, query);
-        validateId(tenantId, INCORRECT_TENANT_ID + tenantId);
-        validateId(customerId, INCORRECT_CUSTOMER_ID + customerId);
+        validateId(tenantId, id -> INCORRECT_TENANT_ID + id);
+        validateId(customerId, id -> INCORRECT_CUSTOMER_ID + id);
         validateEntityDataQuery(query);
-        return this.entityQueryDao.findEntityDataByQuery(tenantId, customerId, query);
+
+        if (!isValidForOptimization(query)) {
+            return this.entityQueryDao.findEntityDataByQuery(tenantId, customerId, query);
+        }
+
+        // 1 step - find entity data by filter and sort columns
+        PageData<EntityData> entityDataByQuery = findEntityIdsByFilterAndSorterColumns(tenantId, customerId, query);
+        if (entityDataByQuery == null || entityDataByQuery.getData().isEmpty()) {
+            return entityDataByQuery;
+        }
+
+        // 2 step - find entity data by entity ids from the 1st step
+        List<EntityData> result = fetchEntityDataByIdsFromInitialQuery(tenantId, customerId, query, entityDataByQuery.getData());
+        return new PageData<>(result, entityDataByQuery.getTotalPages(), entityDataByQuery.getTotalElements(), entityDataByQuery.hasNext());
     }
 
-    //TODO: 3.1 Remove this from project.
     @Override
-    public ListenableFuture<String> fetchEntityNameAsync(TenantId tenantId, EntityId entityId) {
-        log.trace("Executing fetchEntityNameAsync [{}]", entityId);
-        ListenableFuture<String> entityName;
-        ListenableFuture<? extends HasName> hasName;
-        switch (entityId.getEntityType()) {
-            case ASSET:
-                hasName = assetService.findAssetByIdAsync(tenantId, new AssetId(entityId.getId()));
-                break;
-            case DEVICE:
-                hasName = deviceService.findDeviceByIdAsync(tenantId, new DeviceId(entityId.getId()));
-                break;
-            case ENTITY_VIEW:
-                hasName = entityViewService.findEntityViewByIdAsync(tenantId, new EntityViewId(entityId.getId()));
-                break;
-            case TENANT:
-                hasName = tenantService.findTenantByIdAsync(tenantId, new TenantId(entityId.getId()));
-                break;
-            case CUSTOMER:
-                hasName = customerService.findCustomerByIdAsync(tenantId, new CustomerId(entityId.getId()));
-                break;
-            case USER:
-                hasName = userService.findUserByIdAsync(tenantId, new UserId(entityId.getId()));
-                break;
-            case DASHBOARD:
-                hasName = dashboardService.findDashboardInfoByIdAsync(tenantId, new DashboardId(entityId.getId()));
-                break;
-            case ALARM:
-                hasName = alarmService.findAlarmByIdAsync(tenantId, new AlarmId(entityId.getId()));
-                break;
-            case RULE_CHAIN:
-                hasName = ruleChainService.findRuleChainByIdAsync(tenantId, new RuleChainId(entityId.getId()));
-                break;
-            default:
-                throw new IllegalStateException("Not Implemented!");
+    public Optional<String> fetchEntityName(TenantId tenantId, EntityId entityId) {
+        log.trace("Executing fetchEntityName [{}]", entityId);
+        return fetchAndConvert(tenantId, entityId, this::getName);
+    }
+
+    @Override
+    public Optional<String> fetchEntityLabel(TenantId tenantId, EntityId entityId) {
+        log.trace("Executing fetchEntityLabel [{}]", entityId);
+        return fetchAndConvert(tenantId, entityId, this::getLabel);
+    }
+
+    @Override
+    public Optional<CustomerId> fetchEntityCustomerId(TenantId tenantId, EntityId entityId) {
+        log.trace("Executing fetchEntityCustomerId [{}]", entityId);
+        return fetchAndConvert(tenantId, entityId, this::getCustomerId);
+    }
+
+    @Override
+    public Optional<NameLabelAndCustomerDetails> fetchNameLabelAndCustomerDetails(TenantId tenantId, EntityId entityId) {
+        log.trace("Executing fetchNameLabelAndCustomerDetails [{}]", entityId);
+        return fetchAndConvert(tenantId, entityId, this::getNameLabelAndCustomerDetails);
+    }
+
+    private <T> Optional<T> fetchAndConvert(TenantId tenantId, EntityId entityId, Function<HasId<?>, T> converter) {
+        EntityDaoService entityDaoService = entityServiceRegistry.getServiceByEntityType(entityId.getEntityType());
+        Optional<HasId<?>> entityOpt = entityDaoService.findEntity(tenantId, entityId);
+        return entityOpt.map(converter);
+    }
+
+    private String getName(HasId<?> entity) {
+        return entity instanceof HasName ? ((HasName) entity).getName() : null;
+    }
+
+    private String getLabel(HasId<?> entity) {
+        if (entity instanceof HasTitle && StringUtils.isNotEmpty(((HasTitle) entity).getTitle())) {
+            return ((HasTitle) entity).getTitle();
         }
-        entityName = Futures.transform(hasName, (Function<HasName, String>) hasName1 -> hasName1 != null ? hasName1.getName() : null, MoreExecutors.directExecutor());
-        return entityName;
+        if (entity instanceof HasLabel && StringUtils.isNotEmpty(((HasLabel) entity).getLabel())) {
+            return ((HasLabel) entity).getLabel();
+        }
+        if (entity instanceof HasEmail && StringUtils.isNotEmpty(((HasEmail) entity).getEmail())) {
+            return ((HasEmail) entity).getEmail();
+        }
+        if (entity instanceof HasName && StringUtils.isNotEmpty(((HasName) entity).getName())) {
+            return ((HasName) entity).getName();
+        }
+        return null;
+    }
+
+    private CustomerId getCustomerId(HasId<?> entity) {
+        if (entity instanceof HasCustomerId hasCustomerId) {
+            CustomerId customerId = hasCustomerId.getCustomerId();
+            if (customerId == null) {
+                customerId = NULL_CUSTOMER_ID;
+            }
+            return customerId;
+        }
+        return NULL_CUSTOMER_ID;
+    }
+
+    private NameLabelAndCustomerDetails getNameLabelAndCustomerDetails(HasId<?> entity) {
+        return new NameLabelAndCustomerDetails(getName(entity), getLabel(entity), getCustomerId(entity));
     }
 
     private static void validateEntityCountQuery(EntityCountQuery query) {
@@ -162,6 +182,8 @@ public class BaseEntityService extends AbstractEntityService implements EntitySe
             throw new IncorrectParameterException("Query entity filter must be specified.");
         } else if (query.getEntityFilter().getType() == null) {
             throw new IncorrectParameterException("Query entity filter type must be specified.");
+        } else if (query.getEntityFilter().getType().equals(EntityFilterType.RELATIONS_QUERY)) {
+            validateRelationQuery((RelationsQueryFilter) query.getEntityFilter());
         }
     }
 
@@ -170,14 +192,87 @@ public class BaseEntityService extends AbstractEntityService implements EntitySe
         validateEntityDataPageLink(query.getPageLink());
     }
 
-    private static void validateEntityDataPageLink(EntityDataPageLink pageLink) {
-        if (pageLink == null) {
-            throw new IncorrectParameterException("Entity Data Page link must be specified.");
-        } else if (pageLink.getPageSize() < 1) {
-            throw new IncorrectParameterException("Incorrect entity data page link page size '"+pageLink.getPageSize()+"'. Page size must be greater than zero.");
-        } else if (pageLink.getPage() < 0) {
-            throw new IncorrectParameterException("Incorrect entity data page link page '"+pageLink.getPage()+"'. Page must be positive integer.");
+    private static void validateRelationQuery(RelationsQueryFilter queryFilter) {
+        if (queryFilter.isMultiRoot() && queryFilter.getMultiRootEntitiesType() == null) {
+            throw new IncorrectParameterException("Multi-root relation query filter should contain 'multiRootEntitiesType'");
         }
+        if (queryFilter.isMultiRoot() && CollectionUtils.isEmpty(queryFilter.getMultiRootEntityIds())) {
+            throw new IncorrectParameterException("Multi-root relation query filter should contain 'multiRootEntityIds' array that contains string representation of UUIDs");
+        }
+        if (!queryFilter.isMultiRoot() && queryFilter.getRootEntity() == null) {
+            throw new IncorrectParameterException("Relation query filter root entity should not be blank");
+        }
+    }
+
+    private boolean isValidForOptimization(EntityDataQuery query) {
+        if (StringUtils.isNotEmpty(query.getPageLink().getTextSearch())) {
+            return false;
+        }
+
+        if (EXCLUDED_TYPES_FROM_OPTIMIZATION.contains(query.getEntityFilter().getType())) {
+            return false;
+        }
+
+        if ((query.getEntityFields() == null || query.getEntityFields().isEmpty()) &&
+                (query.getLatestValues() == null || query.getLatestValues().isEmpty())) {
+            return false;
+        }
+
+        Set<EntityKey> filteringKeys = new HashSet<>(Optional.ofNullable(query.getKeyFilters()).orElse(Collections.emptyList()).stream().map(KeyFilter::getKey).toList());
+        Set<EntityKey> entityFields = new HashSet<>(Optional.ofNullable(query.getEntityFields()).orElse(Collections.emptyList()));
+        Set<EntityKey> latestValues = new HashSet<>(Optional.ofNullable(query.getLatestValues()).orElse(Collections.emptyList()));
+
+        return !(filteringKeys.containsAll(entityFields) && filteringKeys.containsAll(latestValues));
+    }
+
+    private PageData<EntityData> findEntityIdsByFilterAndSorterColumns(TenantId tenantId, CustomerId customerId, EntityDataQuery query) {
+        List<EntityKey> entityFields = null;
+        List<EntityKey> latestValues = null;
+        if (query.getPageLink().getSortOrder() != null) {
+            if (query.getEntityFields() != null) {
+                entityFields = query.getEntityFields().stream()
+                        .filter(entityKey -> entityKey.getKey().equals(query.getPageLink().getSortOrder().getKey().getKey()))
+                        .collect(Collectors.toList());
+            }
+            if (query.getLatestValues() != null) {
+                latestValues = query.getLatestValues().stream()
+                        .filter(entityKey -> entityKey.getKey().equals(query.getPageLink().getSortOrder().getKey().getKey()))
+                        .collect(Collectors.toList());
+            }
+        }
+        EntityDataQuery entityQuery = new EntityDataQuery(query.getEntityFilter(), query.getPageLink(), entityFields, latestValues, query.getKeyFilters());
+        return this.entityQueryDao.findEntityDataByQuery(tenantId, customerId, entityQuery);
+    }
+
+    private List<EntityData> fetchEntityDataByIdsFromInitialQuery(TenantId tenantId, CustomerId customerId, EntityDataQuery query, List<EntityData> initialQueryResult) {
+        List<EntityData> result = new ArrayList<>();
+
+        List<String> entityIds = initialQueryResult.stream().map(d -> d.getEntityId().getId().toString()).collect(Collectors.toList());
+        EntityType entityType = initialQueryResult.get(0).getEntityId().getEntityType();
+
+        if (entityIds.size() > MAX_ENTITY_IDS_SIZE) {
+            List<List<String>> chunks = new ArrayList<>();
+            for (int i = 0; i < entityIds.size(); i += MAX_ENTITY_IDS_SIZE) {
+                chunks.add(entityIds.subList(i, Math.min(entityIds.size(), i + MAX_ENTITY_IDS_SIZE)));
+            }
+            for (List<String> chunk : chunks) {
+                result.addAll(findEntityDataByEntityIds(tenantId, customerId, query, chunk, entityType, chunk.size()));
+            }
+        } else {
+            result.addAll(findEntityDataByEntityIds(tenantId, customerId, query, entityIds, entityType, query.getPageLink().getPageSize()));
+        }
+        return result;
+    }
+
+    private List<EntityData> findEntityDataByEntityIds(TenantId tenantId, CustomerId customerId, EntityDataQuery query,
+                                                       List<String> entityIds, EntityType entityType, int pageSize) {
+        EntityListFilter filter = new EntityListFilter();
+        filter.setEntityType(entityType);
+        filter.setEntityList(entityIds);
+
+        EntityDataPageLink pageLink = new EntityDataPageLink(pageSize, 0, null, query.getPageLink().getSortOrder());
+        EntityDataQuery entityQuery = new EntityDataQuery(filter, pageLink, query.getEntityFields(), query.getLatestValues(), null);
+        return this.entityQueryDao.findEntityDataByQuery(tenantId, customerId, entityQuery).getData();
     }
 
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,10 @@ import org.thingsboard.server.common.data.rule.RuleNode;
 
 @Slf4j
 public class RuleNodeException extends RuleEngineException {
+
+    private static final long serialVersionUID = -1776681087370749776L;
+    public static final String UNKNOWN = "Unknown";
+
     @Getter
     private final String ruleChainName;
     @Getter
@@ -33,6 +37,7 @@ public class RuleNodeException extends RuleEngineException {
     @Getter
     private final RuleNodeId ruleNodeId;
 
+
     public RuleNodeException(String message, String ruleChainName, RuleNode ruleNode) {
         super(message);
         this.ruleChainName = ruleChainName;
@@ -41,20 +46,20 @@ public class RuleNodeException extends RuleEngineException {
             this.ruleChainId = ruleNode.getRuleChainId();
             this.ruleNodeId = ruleNode.getId();
         } else {
-            ruleNodeName = "Unknown";
+            ruleNodeName = UNKNOWN;
             ruleChainId = new RuleChainId(RuleChainId.NULL_UUID);
             ruleNodeId = new RuleNodeId(RuleNodeId.NULL_UUID);
         }
     }
 
-    public String toJsonString() {
+    public String toJsonString(int maxMessageLength) {
         try {
             return mapper.writeValueAsString(mapper.createObjectNode()
                     .put("ruleNodeId", ruleNodeId.toString())
                     .put("ruleChainId", ruleChainId.toString())
                     .put("ruleNodeName", ruleNodeName)
                     .put("ruleChainName", ruleChainName)
-                    .put("message", getMessage()));
+                    .put("message", truncateIfNecessary(getMessage(), maxMessageLength)));
         } catch (JsonProcessingException e) {
             log.warn("Failed to serialize exception ", e);
             throw new RuntimeException(e);

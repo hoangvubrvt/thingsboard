@@ -1,5 +1,5 @@
 /*
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,18 @@
 import * as React from 'react';
 import ThingsboardAceEditor from './json-form-ace-editor';
 import { JsonFormFieldProps, JsonFormFieldState } from '@shared/components/json-form/react/json-form.models';
+import { Observable } from 'rxjs/internal/Observable';
+import { beautifyJs } from '@shared/models/beautify.models';
 
 class ThingsboardJson extends React.Component<JsonFormFieldProps, JsonFormFieldState> {
 
-    constructor(props) {
+    constructor(props: JsonFormFieldProps) {
         super(props);
         this.onTidyJson = this.onTidyJson.bind(this);
     }
 
-    onTidyJson(json: string): string {
-        return js_beautify(json, {indent_size: 4});
+    onTidyJson(json: string): Observable<string> {
+        return beautifyJs(json, {indent_size: 4});
     }
 
     render() {

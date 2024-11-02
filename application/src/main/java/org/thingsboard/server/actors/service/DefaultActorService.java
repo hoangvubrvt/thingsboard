@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,17 @@
  */
 package org.thingsboard.server.actors.service;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.thingsboard.common.util.ThingsBoardExecutors;
 import org.thingsboard.common.util.ThingsBoardThreadFactory;
 import org.thingsboard.server.actors.ActorSystemContext;
 import org.thingsboard.server.actors.DefaultTbActorSystem;
-import org.thingsboard.server.actors.TbActorId;
 import org.thingsboard.server.actors.TbActorRef;
 import org.thingsboard.server.actors.TbActorSystem;
 import org.thingsboard.server.actors.TbActorSystemSettings;
@@ -32,17 +33,17 @@ import org.thingsboard.server.actors.app.AppActor;
 import org.thingsboard.server.actors.app.AppInitMsg;
 import org.thingsboard.server.actors.stats.StatsActor;
 import org.thingsboard.server.common.msg.queue.PartitionChangeMsg;
-import org.thingsboard.server.queue.discovery.PartitionChangeEvent;
+import org.thingsboard.server.common.msg.queue.ServiceType;
+import org.thingsboard.server.queue.discovery.TbApplicationEventListener;
+import org.thingsboard.server.queue.discovery.event.PartitionChangeEvent;
+import org.thingsboard.server.queue.util.AfterStartUp;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 @Service
 @Slf4j
-public class DefaultActorService implements ActorService {
+public class DefaultActorService extends TbApplicationEventListener<PartitionChangeEvent> implements ActorService {
 
     public static final String APP_DISPATCHER_NAME = "app-dispatcher";
     public static final String TENANT_DISPATCHER_NAME = "tenant-dispatcher";
@@ -74,7 +75,7 @@ public class DefaultActorService implements ActorService {
     @Value("${actors.system.device_dispatcher_pool_size:4}")
     private int deviceDispatcherSize;
 
-    @Value("${actors.system.rule_dispatcher_pool_size:4}")
+    @Value("${actors.system.rule_dispatcher_pool_size:8}")
     private int ruleDispatcherSize;
 
     @PostConstruct
@@ -108,20 +109,25 @@ public class DefaultActorService implements ActorService {
         if (poolSize == 1) {
             return Executors.newSingleThreadExecutor(ThingsBoardThreadFactory.forName(dispatcherName));
         } else {
-            return Executors.newWorkStealingPool(poolSize);
+            return ThingsBoardExecutors.newWorkStealingPool(poolSize, dispatcherName);
         }
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @AfterStartUp(order = AfterStartUp.ACTOR_SYSTEM)
     public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
         log.info("Received application ready event. Sending application init message to actor system");
         appActor.tellWithHighPriority(new AppInitMsg());
     }
 
-    @EventListener(PartitionChangeEvent.class)
-    public void onApplicationEvent(PartitionChangeEvent partitionChangeEvent) {
+    @Override
+    protected void onTbApplicationEvent(PartitionChangeEvent event) {
         log.info("Received partition change event.");
-        this.appActor.tellWithHighPriority(new PartitionChangeMsg(partitionChangeEvent.getServiceQueueKey(), partitionChangeEvent.getPartitions()));
+        appActor.tellWithHighPriority(new PartitionChangeMsg(event.getServiceType()));
+    }
+
+    @Override
+    protected boolean filterTbApplicationEvent(PartitionChangeEvent event) {
+        return event.getServiceType() == ServiceType.TB_RULE_ENGINE || event.getServiceType() == ServiceType.TB_CORE;
     }
 
     @PreDestroy

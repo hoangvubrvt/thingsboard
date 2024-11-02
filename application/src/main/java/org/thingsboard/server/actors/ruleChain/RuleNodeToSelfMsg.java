@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,22 @@
  */
 package org.thingsboard.server.actors.ruleChain;
 
-import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
+import org.thingsboard.rule.engine.api.TbContext;
 import org.thingsboard.server.common.msg.MsgType;
-import org.thingsboard.server.common.msg.TbActorMsg;
 import org.thingsboard.server.common.msg.TbMsg;
 
 /**
  * Created by ashvayka on 19.03.18.
  */
-@Data
-final class RuleNodeToSelfMsg implements TbActorMsg {
+@EqualsAndHashCode(callSuper = true)
+@ToString
+final class RuleNodeToSelfMsg extends TbToRuleNodeActorMsg {
 
-    private final TbMsg msg;
+    public RuleNodeToSelfMsg(TbContext ctx, TbMsg tbMsg) {
+        super(ctx, tbMsg);
+    }
 
     @Override
     public MsgType getMsgType() {

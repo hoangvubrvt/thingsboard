@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -26,17 +26,19 @@ import { Type } from '@angular/core';
 import { EntityAction } from './entity-component.models';
 import { HasUUID } from '@shared/models/id/has-uuid';
 import { PageLink } from '@shared/models/page/page-link';
-import { EntitiesTableComponent } from '@home/components/entity/entities-table.component';
 import { EntityTableHeaderComponent } from '@home/components/entity/entity-table-header.component';
 import { ActivatedRoute } from '@angular/router';
 import { EntityTabsComponent } from '../../components/entity/entity-tabs.component';
+import { DAY, historyInterval } from '@shared/models/time/time.models';
+import { IEntitiesTableComponent } from '@home/models/entity/entity-table-component.models';
+import { IEntityDetailsPageComponent } from '@home/models/entity/entity-details-page-component.models';
 
 export type EntityBooleanFunction<T extends BaseData<HasId>> = (entity: T) => boolean;
 export type EntityStringFunction<T extends BaseData<HasId>> = (entity: T) => string;
 export type EntityVoidFunction<T extends BaseData<HasId>> = (entity: T) => void;
 export type EntityIdsVoidFunction<T extends BaseData<HasId>> = (ids: HasUUID[]) => void;
 export type EntityCountStringFunction = (count: number) => string;
-export type EntityTwoWayOperation<T extends BaseData<HasId>> = (entity: T) => Observable<T>;
+export type EntityTwoWayOperation<T extends BaseData<HasId>> = (entity: T, originalEntity?: T) => Observable<T>;
 export type EntityByIdOperation<T extends BaseData<HasId>> = (id: HasUUID) => Observable<T>;
 export type EntityIdOneWayOperation = (id: HasUUID) => Observable<any>;
 export type EntityActionFunction<T extends BaseData<HasId>> = (action: EntityAction<T>) => boolean;
@@ -47,15 +49,19 @@ export type CellContentFunction<T extends BaseData<HasId>> = (entity: T, key: st
 export type CellTooltipFunction<T extends BaseData<HasId>> = (entity: T, key: string) => string | undefined;
 export type HeaderCellStyleFunction<T extends BaseData<HasId>> = (key: string) => object;
 export type CellStyleFunction<T extends BaseData<HasId>> = (entity: T, key: string) => object;
+export type CopyCellContent<T extends BaseData<HasId>> = (entity: T, key: string, length: number) => object;
+
+export enum CellActionDescriptorType { 'DEFAULT', 'COPY_BUTTON'}
 
 export interface CellActionDescriptor<T extends BaseData<HasId>> {
   name: string;
   nameFunction?: (entity: T) => string;
   icon?: string;
-  mdiIcon?: string;
+  iconFunction?: (entity: T) => string;
   style?: any;
   isEnabled: (entity: T) => boolean;
-  onAction: ($event: MouseEvent, entity: T) => void;
+  onAction: ($event: MouseEvent, entity: T) => any;
+  type?: CellActionDescriptorType;
 }
 
 export interface GroupActionDescriptor<T extends BaseData<HasId>> {
@@ -72,7 +78,7 @@ export interface HeaderActionDescriptor {
   onAction: ($event: MouseEvent) => void;
 }
 
-export type EntityTableColumnType = 'content' | 'action';
+export type EntityTableColumnType = 'content' | 'action' | 'link' | 'entityChips';
 
 export class BaseEntityTableColumn<T extends BaseData<HasId>> {
   constructor(public type: EntityTableColumnType,
@@ -94,7 +100,8 @@ export class EntityTableColumn<T extends BaseData<HasId>> extends BaseEntityTabl
               public sortable: boolean = true,
               public headerCellStyleFunction: HeaderCellStyleFunction<T> = () => ({}),
               public cellTooltipFunction: CellTooltipFunction<T> = () => undefined,
-              public isNumberColumn: boolean = false) {
+              public isNumberColumn: boolean = false,
+              public actionCell: CellActionDescriptor<T> = null) {
     super('content', key, title, width, sortable);
   }
 }
@@ -105,6 +112,17 @@ export class EntityActionTableColumn<T extends BaseData<HasId>> extends BaseEnti
               public actionDescriptor: CellActionDescriptor<T>,
               public width: string = '0px') {
     super('action', key, title, width, false);
+  }
+}
+
+export class EntityLinkTableColumn<T extends BaseData<HasId>> extends BaseEntityTableColumn<T> {
+  constructor(public key: string,
+              public title: string,
+              public width: string = '0px',
+              public cellContentFunction: CellContentFunction<T> = (entity, property) => entity[property] ? entity[property] : '',
+              public entityURL: (entity) => string,
+              public sortable: boolean = true) {
+    super('link', key, title, width, sortable);
   }
 }
 
@@ -123,18 +141,30 @@ export class DateEntityTableColumn<T extends BaseData<HasId>> extends EntityTabl
   }
 }
 
-export type EntityColumn<T extends BaseData<HasId>> = EntityTableColumn<T> | EntityActionTableColumn<T>;
+export class EntityChipsEntityTableColumn<T extends BaseData<HasId>> extends BaseEntityTableColumn<T> {
+  constructor(public key: string,
+              public title: string,
+              public width: string = '0px') {
+    super('entityChips', key, title, width, false);
+  }
+}
+
+export type EntityColumn<T extends BaseData<HasId>> = EntityTableColumn<T> | EntityActionTableColumn<T> | EntityLinkTableColumn<T> | EntityChipsEntityTableColumn<T>;
 
 export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = PageLink, L extends BaseData<HasId> = T> {
 
   constructor() {}
 
+  private table: IEntitiesTableComponent = null;
+  private entityDetailsPage: IEntityDetailsPageComponent = null;
+
   componentsData: any = null;
 
   loadDataOnInit = true;
   onLoadAction: (route: ActivatedRoute) => void = null;
-  table: EntitiesTableComponent = null;
   useTimePageLink = false;
+  forAllTimeEnabled = false;
+  defaultTimewindowInterval = historyInterval(DAY);
   entityType: EntityType = null;
   tableTitle = '';
   selectionEnabled = true;
@@ -143,6 +173,7 @@ export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = P
   entitiesDeleteEnabled = true;
   detailsPanelEnabled = true;
   hideDetailsTabsOnEdit = true;
+  rowPointer = false;
   actionsColumnTitle = null;
   entityTranslations: EntityTypeTranslation;
   entityResources: EntityTypeResource<T>;
@@ -151,6 +182,7 @@ export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = P
   addDialogStyle = {};
   defaultSortOrder: SortOrder = {property: 'createdTime', direction: Direction.DESC};
   displayPagination = true;
+  pageMode = true;
   defaultPageSize = 10;
   columns: Array<EntityColumn<L>> = [];
   cellActionDescriptors: Array<CellActionDescriptor<L>> = [];
@@ -160,9 +192,8 @@ export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = P
   headerComponent: Type<EntityTableHeaderComponent<T, P, L>>;
   addEntity: CreateEntityOperation<T> = null;
   dataSource: (dataLoadedFunction: (col?: number, row?: number) => void)
-    => EntitiesDataSource<L> = (dataLoadedFunction: (col?: number, row?: number) => void) => {
-    return new EntitiesDataSource(this.entitiesFetchFunction, this.entitySelectionEnabled, dataLoadedFunction);
-  };
+    => EntitiesDataSource<L> = (dataLoadedFunction: (col?: number, row?: number) => void) =>
+    new EntitiesDataSource(this.entitiesFetchFunction, this.entitySelectionEnabled, dataLoadedFunction);
   detailsReadonly: EntityBooleanFunction<T> = () => false;
   entitySelectionEnabled: EntityBooleanFunction<L> = () => true;
   deleteEnabled: EntityBooleanFunction<T | L> = () => true;
@@ -170,8 +201,8 @@ export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = P
   deleteEntityContent: EntityStringFunction<L> = () => '';
   deleteEntitiesTitle: EntityCountStringFunction = () => '';
   deleteEntitiesContent: EntityCountStringFunction = () => '';
-  loadEntity: EntityByIdOperation<T> = () => of();
-  saveEntity: EntityTwoWayOperation<T> = (entity) => of(entity);
+  loadEntity: EntityByIdOperation<T | L> = () => of();
+  saveEntity: EntityTwoWayOperation<T> = (entity, originalEntity) => of(entity);
   deleteEntity: EntityIdOneWayOperation = () => of();
   entitiesFetchFunction: EntitiesFetchFunction<L, P> = () => of(emptyPageData<L>());
   onEntityAction: EntityActionFunction<T> = () => false;
@@ -180,8 +211,55 @@ export class EntityTableConfig<T extends BaseData<HasId>, P extends PageLink = P
   entityAdded: EntityVoidFunction<T> = () => {};
   entityUpdated: EntityVoidFunction<T> = () => {};
   entitiesDeleted: EntityIdsVoidFunction<T> = () => {};
+
+  getTable(): IEntitiesTableComponent {
+    return this.table;
+  }
+
+  setTable(table: IEntitiesTableComponent) {
+    this.table = table;
+    this.entityDetailsPage = null;
+  }
+
+  getEntityDetailsPage(): IEntityDetailsPageComponent {
+    return this.entityDetailsPage;
+  }
+
+  setEntityDetailsPage(entityDetailsPage: IEntityDetailsPageComponent) {
+    this.entityDetailsPage = entityDetailsPage;
+    this.table = null;
+  }
+
+  updateData(closeDetails = false) {
+    if (this.table) {
+      this.table.updateData(closeDetails);
+    } else if (this.entityDetailsPage) {
+      this.entityDetailsPage.reload();
+    }
+  }
+
+  toggleEntityDetails($event: Event, entity: T) {
+    if (this.table) {
+      this.table.toggleEntityDetails($event, entity);
+    }
+  }
+
+  isDetailsOpen(): boolean {
+    if (this.table) {
+      return this.table.isDetailsOpen;
+    } else {
+      return false;
+    }
+  }
+
+  getActivatedRoute(): ActivatedRoute {
+    if (this.table) {
+      return this.table.route;
+    } else {
+      return null;
+    }
+  }
 }
 
-export function checkBoxCell(value: boolean): string {
-  return `<mat-icon class="material-icons mat-icon">${value ? 'check_box' : 'check_box_outline_blank'}</mat-icon>`;
-}
+export const checkBoxCell =
+  (value: boolean): string => `<mat-icon class="material-icons mat-icon">${value ? 'check_box' : 'check_box_outline_blank'}</mat-icon>`;

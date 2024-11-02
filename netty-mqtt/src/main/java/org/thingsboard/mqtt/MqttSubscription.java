@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ final class MqttSubscription {
 
     private final boolean once;
 
-    private boolean called;
+    private volatile boolean called;
 
     MqttSubscription(String topic, MqttHandler handler, boolean once) {
-        if(topic == null){
+        if (topic == null) {
             throw new NullPointerException("topic");
         }
-        if(handler == null){
+        if (handler == null) {
             throw new NullPointerException("handler");
         }
         this.topic = topic;
@@ -56,7 +56,7 @@ final class MqttSubscription {
         return called;
     }
 
-    boolean matches(String topic){
+    boolean matches(String topic) {
         return this.topicRegex.matcher(topic).matches();
     }
 

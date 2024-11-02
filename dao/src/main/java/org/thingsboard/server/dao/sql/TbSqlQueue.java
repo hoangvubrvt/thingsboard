@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@ package org.thingsboard.server.dao.sql;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.util.Comparator;
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.function.Function;
 
-public interface TbSqlQueue<E> {
+public interface TbSqlQueue<E, R> {
 
-    void init(ScheduledLogExecutorComponent logExecutor, Consumer<List<E>> saveFunction, int queueIndex);
+    void init(ScheduledLogExecutorComponent logExecutor, Function<List<E>, List<R>> saveFunction, Comparator<E> batchUpdateComparator, Function<List<TbSqlQueueElement<E, R>>, List<TbSqlQueueElement<E, R>>> filter, int queueIndex);
 
     void destroy();
 
-    ListenableFuture<Void> add(E element);
+    ListenableFuture<R> add(E element);
 }

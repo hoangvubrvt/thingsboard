@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,19 +14,27 @@
 /// limitations under the License.
 ///
 
-import L, { LatLngBounds, LatLngLiteral, LatLngTuple } from 'leaflet';
+import L, { LatLngBounds, LatLngLiteral, LatLngTuple, PointExpression } from 'leaflet';
 import LeafletMap from '../leaflet-map';
-import { MapImage, PosFuncton, UnitedMapSettings } from '../map-models';
-import { Observable, ReplaySubject } from 'rxjs';
-import { filter, map, mergeMap } from 'rxjs/operators';
-import { aspectCache, calculateNewPointCoordinate, parseFunction } from '@home/components/widget/lib/maps/maps-utils';
+import {
+  CircleData,
+  defaultImageMapProviderSettings,
+  MapImage,
+  PosFunction,
+  WidgetUnitedMapSettings
+} from '../map-models';
+import { Observable, of, ReplaySubject, switchMap } from 'rxjs';
+import { catchError } from 'rxjs/operators';
+import { calculateNewPointCoordinate, loadImageWithAspect } from '@home/components/widget/lib/maps/common-maps-utils';
 import { WidgetContext } from '@home/models/widget-component.models';
-import { DataSet, DatasourceType, widgetType } from '@shared/models/widget.models';
+import { DataSet, DatasourceType, FormattedData, widgetType } from '@shared/models/widget.models';
 import { DataKeyType } from '@shared/models/telemetry/telemetry.models';
 import { WidgetSubscriptionOptions } from '@core/api/widget-api.models';
-import { isDefinedAndNotNull } from '@core/utils';
+import { isDefinedAndNotNull, isEmptyStr, isNotEmptyStr, parseFunction } from '@core/utils';
+import { EntityDataPageLink } from '@shared/models/query/query.models';
+import { ImagePipe } from '@shared/pipe/image.pipe';
 
-const maxZoom = 4;// ?
+const maxZoom = 4; // ?
 
 export class ImageMap extends LeafletMap {
 
@@ -35,11 +43,12 @@ export class ImageMap extends LeafletMap {
     width = 0;
     height = 0;
     imageUrl: string;
-    posFunction: PosFuncton;
+    posFunction: PosFunction;
 
-    constructor(ctx: WidgetContext, $container: HTMLElement, options: UnitedMapSettings) {
+    constructor(ctx: WidgetContext, $container: HTMLElement, options: WidgetUnitedMapSettings) {
         super(ctx, $container, options);
-        this.posFunction = parseFunction(options.posFunction, ['origXPos', 'origYPos']) as PosFuncton;
+        this.posFunction = parseFunction(options.posFunction,
+          ['origXPos', 'origYPos', 'data', 'dsData', 'dsIndex', 'aspect']) as PosFunction;
         this.mapImage(options).subscribe((mapImage) => {
           this.imageUrl = mapImage.imageUrl;
           this.aspect = mapImage.aspect;
@@ -48,20 +57,19 @@ export class ImageMap extends LeafletMap {
           } else {
             this.onResize();
             super.setMap(this.map);
-            super.initSettings(options);
           }
         });
     }
 
-    private mapImage(options: UnitedMapSettings): Observable<MapImage> {
+    private mapImage(options: WidgetUnitedMapSettings): Observable<MapImage> {
       const imageEntityAlias = options.imageEntityAlias;
       const imageUrlAttribute = options.imageUrlAttribute;
       if (!imageEntityAlias || !imageUrlAttribute) {
-        return this.imageFromUrl(options.mapUrl);
+        return this.imageFromUrl(options.mapImageUrl);
       }
       const entityAliasId = this.ctx.aliasController.getEntityAliasId(imageEntityAlias);
       if (!entityAliasId) {
-        return this.imageFromUrl(options.mapUrl);
+        return this.imageFromUrl(options.mapImageUrl);
       }
       const datasources = [
         {
@@ -84,57 +92,82 @@ export class ImageMap extends LeafletMap {
       let isUpdate = false;
       const imageUrlSubscriptionOptions: WidgetSubscriptionOptions = {
         datasources,
+        hasDataPageLink: true,
+        singleEntity: true,
         useDashboardTimewindow: false,
         type: widgetType.latest,
         callbacks: {
           onDataUpdated: (subscription) => {
-            result.next([subscription.data[0]?.data, isUpdate]);
+            if (isNotEmptyStr(subscription.data[0]?.data[0]?.[1])) {
+              result.next([subscription.data[0].data, isUpdate]);
+            } else {
+              result.next([[[0, options.mapImageUrl]], isUpdate]);
+            }
             isUpdate = true;
           }
         }
       };
-      this.ctx.subscriptionApi.createSubscription(imageUrlSubscriptionOptions, true).subscribe(() => { });
+      this.ctx.subscriptionApi.createSubscription(imageUrlSubscriptionOptions, true).subscribe((subscription) => {
+        const pageLink: EntityDataPageLink = {
+          page: 0,
+          pageSize: 1,
+          textSearch: null,
+          dynamic: true
+        };
+        subscription.subscribeAllForPaginatedData(pageLink, null);
+      });
       return this.imageFromAlias(result);
     }
 
     private imageFromUrl(url: string): Observable<MapImage> {
-      return aspectCache(url).pipe(
-        map( aspect => {
-            const mapImage: MapImage = {
-              imageUrl: url,
-              aspect,
-              update: false
-            };
-            return mapImage;
+      return loadImageWithAspect(this.ctx.$injector.get(ImagePipe), url).pipe(
+        switchMap( aspectImage => {
+            if (aspectImage) {
+              return of({
+                imageUrl: aspectImage.url,
+                aspect: aspectImage.aspect,
+                update: false
+              });
+            } else {
+              return this.imageFromUrl(defaultImageMapProviderSettings.mapImageUrl);
+            }
           }
-        ));
+        ),
+        catchError(() => this.imageFromUrl(defaultImageMapProviderSettings.mapImageUrl))
+      );
     }
 
     private imageFromAlias(alias: Observable<[DataSet, boolean]>): Observable<MapImage> {
       return alias.pipe(
-        filter(result => result[0].length > 0),
-        mergeMap(res => {
+        switchMap(res => {
+          const url = res[0][0][1];
           const mapImage: MapImage = {
-            imageUrl: res[0][0][1],
+            imageUrl: null,
             aspect: null,
             update: res[1]
           };
-          return aspectCache(mapImage.imageUrl).pipe(
-            map((aspect) => {
-                mapImage.aspect = aspect;
-                return mapImage;
-              }
-            ));
+          return loadImageWithAspect(this.ctx.$injector.get(ImagePipe), url).pipe(
+            switchMap((aspectImage) => {
+                if (aspectImage) {
+                  mapImage.aspect = aspectImage.aspect;
+                  mapImage.imageUrl = aspectImage.url;
+                  return of(mapImage);
+                } else {
+                  return this.imageFromUrl(defaultImageMapProviderSettings.mapImageUrl);
+                }
+              }),
+            catchError(() => this.imageFromUrl(defaultImageMapProviderSettings.mapImageUrl))
+          );
         })
       );
     }
 
-    updateBounds(updateImage?: boolean, lastCenterPos?) {
+    updateBounds(updateImage?: boolean, lastCenterPos?: L.Point) {
         const w = this.width;
         const h = this.height;
-        let southWest = this.pointToLatLng(0, h);
-        let northEast = this.pointToLatLng(w, 0);
-        const bounds = new L.LatLngBounds(southWest, northEast);
+        this.southWest = this.pointToLatLng(0, h);
+        this.northEast = this.pointToLatLng(w, 0);
+        const bounds = new L.LatLngBounds(this.southWest, this.northEast);
 
         if (updateImage && this.imageOverlay) {
             this.imageOverlay.remove();
@@ -147,104 +180,202 @@ export class ImageMap extends LeafletMap {
             this.imageOverlay = L.imageOverlay(this.imageUrl, bounds).addTo(this.map);
         }
         const padding = 200 * maxZoom;
-        southWest = this.pointToLatLng(-padding, h + padding);
-        northEast = this.pointToLatLng(w + padding, -padding);
+        const southWest = this.pointToLatLng(-padding, h + padding);
+        const northEast = this.pointToLatLng(w + padding, -padding);
         const maxBounds = new L.LatLngBounds(southWest, northEast);
+        (this.map as any)._enforcingBounds = true;
         this.map.setMaxBounds(maxBounds);
         if (lastCenterPos) {
             lastCenterPos.x *= w;
             lastCenterPos.y *= h;
             const center = this.pointToLatLng(lastCenterPos.x, lastCenterPos.y);
-            setTimeout(() => {
-                this.map.panTo(center, { animate: false });
-            }, 0);
+            this.map.panTo(center, { animate: false });
         }
+        (this.map as any)._enforcingBounds = false;
     }
 
     onResize(updateImage?: boolean) {
-        let width = this.$container.clientWidth;
-        if (width > 0 && this.aspect) {
-            let height = width / this.aspect;
-            const imageMapHeight = this.$container.clientHeight;
-            if (imageMapHeight > 0 && height > imageMapHeight) {
-                height = imageMapHeight;
-                width = height * this.aspect;
-            }
-            width *= maxZoom;
-            const prevWidth = this.width;
-            const prevHeight = this.height;
-            if (this.width !== width || updateImage) {
-                this.width = width;
-                this.height = width / this.aspect;
-                if (!this.map) {
-                    this.initMap(updateImage);
-                } else {
-                    const lastCenterPos = this.latLngToPoint(this.map.getCenter());
-                    lastCenterPos.x /= prevWidth;
-                    lastCenterPos.y /= prevHeight;
-                    this.updateBounds(updateImage, lastCenterPos);
-                    this.map.invalidateSize(true);
-                    this.updateMarkers(this.markersData);
-                    this.updatePolygons(this.polygonsData);
-                }
-            }
+      let width = this.$container.clientWidth;
+      if (width > 0 && this.aspect) {
+        let height = Math.round(width / this.aspect);
+        const imageMapHeight = this.$container.clientHeight;
+        if (imageMapHeight > 0 && height > imageMapHeight) {
+          height = imageMapHeight;
+          width = Math.round(height * this.aspect);
         }
+        width *= maxZoom;
+        const prevWidth = this.width;
+        const prevHeight = this.height;
+        if (this.width !== width || updateImage) {
+          this.width = width;
+          this.height = Math.round(width / this.aspect);
+          if (!this.map) {
+            this.initMap(updateImage);
+          } else {
+            const lastCenterPos = this.latLngToPoint(this.map.getCenter());
+            lastCenterPos.x /= prevWidth;
+            lastCenterPos.y /= prevHeight;
+            this.updateBounds(updateImage, lastCenterPos);
+            (this.map as any)._enforcingBounds = true;
+            this.map.invalidateSize(false);
+            (this.map as any)._enforcingBounds = false;
+            this.updateMarkers(this.markersData);
+            if (this.options.showPolygon) {
+              this.updatePolygons(this.polygonsData);
+            }
+            if (this.options.showCircle) {
+              this.updateCircle(this.circleData);
+            }
+          }
+        }
+      }
     }
 
-    fitBounds(bounds: LatLngBounds, padding?: LatLngTuple) { }
+    fitBounds(_bounds: LatLngBounds, _padding?: PointExpression) { }
 
     initMap(updateImage?: boolean) {
-        if (!this.map && this.aspect > 0) {
-            const center = this.pointToLatLng(this.width / 2, this.height / 2);
-            this.map = L.map(this.$container, {
-                minZoom: 1,
-                maxZoom,
-                scrollWheelZoom: !this.options.disableScrollZooming,
-                center,
-                zoom: 1,
-                crs: L.CRS.Simple,
-                attributionControl: false
-            });
-            this.updateBounds(updateImage);
-        }
+      if (!this.map && this.aspect > 0) {
+        const center = this.pointToLatLng(this.width / 2, this.height / 2);
+        this.map = L.map(this.$container, {
+          minZoom: 1,
+          maxZoom,
+          scrollWheelZoom: !this.options.disableScrollZooming,
+          center,
+          doubleClickZoom: !this.options.disableDoubleClickZooming,
+          zoomControl: !this.options.disableZoomControl,
+          zoom: 1,
+          crs: L.CRS.Simple,
+          attributionControl: false
+        });
+        this.updateBounds(updateImage);
+      }
     }
 
-    convertPosition(expression): L.LatLng {
-      const xPos = expression[this.options.xPosKeyName];
-      const yPos = expression[this.options.yPosKeyName];
-      if (!isDefinedAndNotNull(xPos) || isNaN(xPos) || !isDefinedAndNotNull(yPos) || isNaN(yPos)) {
+    extractPosition(data: FormattedData): {x: number; y: number} {
+      if (!data) {
         return null;
       }
-      Object.assign(expression, this.posFunction(xPos, yPos));
-      return this.pointToLatLng(
-        expression.x * this.width,
-        expression.y * this.height);
+      const xPos = data[this.options.xPosKeyName];
+      const yPos = data[this.options.yPosKeyName];
+      if (!isDefinedAndNotNull(xPos) || isEmptyStr(xPos) || isNaN(xPos) || !isDefinedAndNotNull(yPos) || isEmptyStr(yPos) || isNaN(yPos)) {
+        return null;
+      }
+      return {x: xPos, y: yPos};
     }
 
-    convertPositionPolygon(expression: Array<[number, number]>): L.LatLngExpression[] {
-      return expression.map((el) => {
-        if (el.length === 2 && !el.some(isNaN)) {
+    positionToLatLng(position: {x: number; y: number}): L.LatLng {
+      return this.pointToLatLng(
+        position.x * this.width,
+        position.y * this.height);
+    }
+
+    convertPosition(data: FormattedData, dsData: FormattedData[]): L.LatLng {
+      const position = this.extractPosition(data);
+      if (position) {
+        const converted = this.posFunction(position.x, position.y, data, dsData, data.dsIndex, this.aspect) || {x: 0, y: 0};
+        return this.positionToLatLng(converted);
+      } else {
+        return null;
+      }
+    }
+
+    convertPositionPolygon(expression: (LatLngTuple | LatLngTuple[] | LatLngTuple[][])[]){
+      return (expression).map((el) => {
+        if (!Array.isArray(el[0]) && !Array.isArray(el[1]) && el.length === 2) {
           return this.pointToLatLng(
             el[0] * this.width,
-            el[1] * this.height)
+            el[1] * this.height
+          );
+        } else if (Array.isArray(el) && el.length) {
+          return this.convertPositionPolygon(el as LatLngTuple[] | LatLngTuple[][]);
+        } else {
+          return null;
         }
-        return null;
-      }).filter(el => !!el)
+      }).filter(el => !!el);
     }
 
-    pointToLatLng(x, y): L.LatLng {
+    pointToLatLng(x: number, y: number): L.LatLng {
         return L.CRS.Simple.pointToLatLng({ x, y } as L.PointExpression, maxZoom - 1);
     }
 
-    latLngToPoint(latLng: LatLngLiteral) {
+    latLngToPoint(latLng: LatLngLiteral): L.Point {
         return L.CRS.Simple.latLngToPoint(latLng, maxZoom - 1);
     }
 
-    convertToCustomFormat(position: L.LatLng): object {
-        const point = this.latLngToPoint(position);
+    convertToCustomFormat(position: L.LatLng, _offset = 0, width = this.width, height = this.height): {[key: string]: any} {
+      if (!position) {
         return {
-            [this.options.xPosKeyName]: calculateNewPointCoordinate(point.x, this.width),
-            [this.options.yPosKeyName]: calculateNewPointCoordinate(point.y, this.height)
-        }
+          [this.options.xPosKeyName]: null,
+          [this.options.yPosKeyName]: null
+        };
+      }
+      const point = this.latLngToPoint(position);
+      const customX = calculateNewPointCoordinate(point.x, width);
+      const customY = calculateNewPointCoordinate(point.y, height);
+      if (customX === 0) {
+        point.x = 0;
+      } else if (customX === 1) {
+        point.x = width;
+      }
+
+      if (customY === 0) {
+        point.y = 0;
+      } else if (customY === 1) {
+        point.y = height;
+      }
+
+      return {
+        [this.options.xPosKeyName]: customX,
+        [this.options.yPosKeyName]: customY
+      };
+    }
+
+    convertToPolygonFormat(points: Array<any>, width = this.width, height = this.height): Array<any> {
+      if (points.length) {
+        return points.map(point => {
+          if (point.length) {
+            return this.convertToPolygonFormat(point, width, height);
+          } else {
+            const pos = this.latLngToPoint(point);
+            return [calculateNewPointCoordinate(pos.x, width), calculateNewPointCoordinate(pos.y, height)];
+          }
+        });
+      } else {
+        return [];
+      }
+    }
+
+    convertPolygonToCustomFormat(expression: any[][]): {[key: string]: any} {
+      const coordinate = expression ? this.convertToPolygonFormat(expression) : null;
+      return {
+        [this.options.polygonKeyName]: coordinate
+      };
+    }
+
+    convertCircleToCustomFormat(expression: L.LatLng, radius: number, width = this.width,
+                                height = this.height): {[key: string]: CircleData} {
+      let circleDara: CircleData = null;
+      if (expression) {
+        const point = this.latLngToPoint(expression);
+        const customX = calculateNewPointCoordinate(point.x, width);
+        const customY = calculateNewPointCoordinate(point.y, height);
+        const customRadius = calculateNewPointCoordinate(radius, width);
+        circleDara = {
+          latitude: customX,
+          longitude: customY,
+          radius: customRadius
+        };
+      }
+      return {
+        [this.options.circleKeyName]: circleDara
+      };
+    }
+
+    convertToCircleFormat(circle: CircleData, width = this.width, height = this.height): CircleData {
+      const centerPoint = this.pointToLatLng(circle.latitude * width, circle.longitude * height);
+      circle.latitude = centerPoint.lat;
+      circle.longitude = centerPoint.lng;
+      circle.radius = circle.radius * width;
+      return circle;
     }
 }

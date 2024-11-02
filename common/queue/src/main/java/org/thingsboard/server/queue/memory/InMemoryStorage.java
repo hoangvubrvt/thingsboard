@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,66 +15,20 @@
  */
 package org.thingsboard.server.queue.memory;
 
-import lombok.extern.slf4j.Slf4j;
 import org.thingsboard.server.queue.TbQueueMsg;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
-@Slf4j
-public final class InMemoryStorage {
-    private static InMemoryStorage instance;
-    private final ConcurrentHashMap<String, BlockingQueue<TbQueueMsg>> storage;
+public interface InMemoryStorage {
 
-    private InMemoryStorage() {
-        storage = new ConcurrentHashMap<>();
-    }
+    void printStats();
 
-    public static InMemoryStorage getInstance() {
-        if (instance == null) {
-            synchronized (InMemoryStorage.class) {
-                if (instance == null) {
-                    instance = new InMemoryStorage();
-                }
-            }
-        }
-        return instance;
-    }
+    int getLagTotal();
 
-    public boolean put(String topic, TbQueueMsg msg) {
-        return storage.computeIfAbsent(topic, (t) -> new LinkedBlockingQueue<>()).add(msg);
-    }
+    int getLag(String topic);
 
-    public <T extends TbQueueMsg> List<T> get(String topic) throws InterruptedException {
-        if (storage.containsKey(topic)) {
-            List<T> entities;
-            T first = (T) storage.get(topic).poll();
-            if (first != null) {
-                entities = new ArrayList<>();
-                entities.add(first);
-                List<TbQueueMsg> otherList = new ArrayList<>();
-                storage.get(topic).drainTo(otherList, 999);
-                for (TbQueueMsg other : otherList) {
-                    entities.add((T) other);
-                }
-            } else {
-                entities = Collections.emptyList();
-            }
-            return entities;
-        }
-        return Collections.emptyList();
-    }
+    boolean put(String topic, TbQueueMsg msg);
 
-    /**
-     * Used primarily for testing.
-     */
-    public void cleanup() {
-        storage.clear();
-    }
+    <T extends TbQueueMsg> List<T> get(String topic) throws InterruptedException;
 
 }

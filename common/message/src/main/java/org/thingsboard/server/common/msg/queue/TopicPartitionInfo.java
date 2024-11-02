@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,13 +41,17 @@ public class TopicPartitionInfo {
         this.partition = partition;
         this.myPartition = myPartition;
         String tmp = topic;
-        if (tenantId != null) {
-            tmp += "." + tenantId.getId().toString();
+        if (tenantId != null && !tenantId.isNullUid()) {
+            tmp += ".isolated." + tenantId.getId().toString();
         }
         if (partition != null) {
             tmp += "." + partition;
         }
         this.fullTopicName = tmp;
+    }
+
+    public TopicPartitionInfo newByTopic(String topic) {
+        return new TopicPartitionInfo(topic, this.tenantId, this.partition, this.myPartition);
     }
 
     public String getTopic() {

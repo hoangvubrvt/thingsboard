@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@
 
   div.tb-editor-area-title-panel {
     position: absolute;
-    top: 13px;
+    top: 8px;
     right: 40px;
     z-index: 5;
     font-size: .8rem;
@@ -72,17 +72,19 @@
 
     &.tb-js-function {
       right: 80px;
+      &.tb-js-function-help {
+        right: 116px;
+      }
     }
 
     label {
       padding: 4px;
       color: #00acc1;
-      text-transform: uppercase;
       background: rgba(220, 220, 220, .35);
       border-radius: 5px;
     }
 
-    .mat-button {
+    .mat-mdc-button {
       min-width: 32px;
       min-height: 15px;
       padding: 4px;

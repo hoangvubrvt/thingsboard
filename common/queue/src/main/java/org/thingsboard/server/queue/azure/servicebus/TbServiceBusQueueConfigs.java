@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,33 @@
  */
 package org.thingsboard.server.queue.azure.servicebus;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.queue.util.PropertyUtils;
 
-import javax.annotation.PostConstruct;
-import java.util.HashMap;
 import java.util.Map;
 
 @Component
 @ConditionalOnExpression("'${queue.type:null}'=='service-bus'")
 public class TbServiceBusQueueConfigs {
-    @Value("${queue.service-bus.queue-properties.core}")
+
+    @Value("${queue.service-bus.queue-properties.core:}")
     private String coreProperties;
-    @Value("${queue.service-bus.queue-properties.rule-engine}")
+    @Value("${queue.service-bus.queue-properties.rule-engine:}")
     private String ruleEngineProperties;
-    @Value("${queue.service-bus.queue-properties.transport-api}")
+    @Value("${queue.service-bus.queue-properties.transport-api:}")
     private String transportApiProperties;
-    @Value("${queue.service-bus.queue-properties.notifications}")
+    @Value("${queue.service-bus.queue-properties.notifications:}")
     private String notificationsProperties;
-    @Value("${queue.service-bus.queue-properties.js-executor}")
+    @Value("${queue.service-bus.queue-properties.js-executor:}")
     private String jsExecutorProperties;
+    @Value("${queue.service-bus.queue-properties.version-control:}")
+    private String vcProperties;
+    @Value("${queue.service-bus.queue-properties.edge:}")
+    private String edgeProperties;
 
     @Getter
     private Map<String, String> coreConfigs;
@@ -48,24 +53,20 @@ public class TbServiceBusQueueConfigs {
     private Map<String, String> notificationsConfigs;
     @Getter
     private Map<String, String> jsExecutorConfigs;
+    @Getter
+    private Map<String, String> vcConfigs;
+    @Getter
+    private Map<String, String> edgeConfigs;
 
     @PostConstruct
     private void init() {
-        coreConfigs = getConfigs(coreProperties);
-        ruleEngineConfigs = getConfigs(ruleEngineProperties);
-        transportApiConfigs = getConfigs(transportApiProperties);
-        notificationsConfigs = getConfigs(notificationsProperties);
-        jsExecutorConfigs = getConfigs(jsExecutorProperties);
+        coreConfigs = PropertyUtils.getProps(coreProperties);
+        ruleEngineConfigs = PropertyUtils.getProps(ruleEngineProperties);
+        transportApiConfigs = PropertyUtils.getProps(transportApiProperties);
+        notificationsConfigs = PropertyUtils.getProps(notificationsProperties);
+        jsExecutorConfigs = PropertyUtils.getProps(jsExecutorProperties);
+        vcConfigs = PropertyUtils.getProps(vcProperties);
+        edgeConfigs = PropertyUtils.getProps(edgeProperties);
     }
 
-    private Map<String, String> getConfigs(String properties) {
-        Map<String, String> configs = new HashMap<>();
-        for (String property : properties.split(";")) {
-            int delimiterPosition = property.indexOf(":");
-            String key = property.substring(0, delimiterPosition);
-            String value = property.substring(delimiterPosition + 1);
-            configs.put(key, value);
-        }
-        return configs;
-    }
 }

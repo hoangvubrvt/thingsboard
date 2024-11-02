@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 ///
 
 import {
+  ChangeDetectorRef,
   Component,
   ElementRef,
   forwardRef,
@@ -23,18 +24,20 @@ import {
   OnDestroy,
   OnInit,
   SimpleChanges,
-  ViewChild
+  ViewChild,
+  ViewEncapsulation
 } from '@angular/core';
-import { ControlValueAccessor, FormControl, NG_VALIDATORS, NG_VALUE_ACCESSOR, Validator } from '@angular/forms';
-import * as ace from 'ace-builds';
-import { coerceBooleanProperty } from '@angular/cdk/coercion';
+import { ControlValueAccessor, NG_VALIDATORS, NG_VALUE_ACCESSOR, UntypedFormControl, Validator } from '@angular/forms';
+import { Ace } from 'ace-builds';
 import { ActionNotificationHide, ActionNotificationShow } from '@core/notification/notification.actions';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { ContentType, contentTypesMap } from '@shared/models/constants';
 import { CancelAnimationFrame, RafService } from '@core/services/raf.service';
 import { guid } from '@core/utils';
-import { ResizeObserver } from '@juggle/resize-observer';
+import { getAce } from '@shared/models/ace/ace.models';
+import { beautifyJs } from '@shared/models/beautify.models';
+import { coerceBoolean } from '@shared/decorators/coercion';
 
 @Component({
   selector: 'tb-json-content',
@@ -51,16 +54,18 @@ import { ResizeObserver } from '@juggle/resize-observer';
       useExisting: forwardRef(() => JsonContentComponent),
       multi: true,
     }
-  ]
+  ],
+  encapsulation: ViewEncapsulation.None
 })
 export class JsonContentComponent implements OnInit, ControlValueAccessor, Validator, OnChanges, OnDestroy {
 
   @ViewChild('jsonEditor', {static: true})
   jsonEditorElmRef: ElementRef;
 
-  private jsonEditor: ace.Ace.Editor;
+  private jsonEditor: Ace.Editor;
   private editorsResizeCaf: CancelAnimationFrame;
   private editorResize$: ResizeObserver;
+  private ignoreChange = false;
 
   toastTargetId = `jsonContentEditor-${guid()}`;
 
@@ -74,32 +79,27 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
 
   @Input() editorStyle: {[klass: string]: any};
 
-  private readonlyValue: boolean;
-  get readonly(): boolean {
-    return this.readonlyValue;
-  }
-  @Input()
-  set readonly(value: boolean) {
-    this.readonlyValue = coerceBooleanProperty(value);
-  }
+  @Input() tbPlaceholder: string;
 
-  private validateContentValue: boolean;
-  get validateContent(): boolean {
-    return this.validateContentValue;
-  }
   @Input()
-  set validateContent(value: boolean) {
-    this.validateContentValue = coerceBooleanProperty(value);
-  }
+  @coerceBoolean()
+  hideToolbar = false;
 
-  private validateOnChangeValue: boolean;
-  get validateOnChange(): boolean {
-    return this.validateOnChangeValue;
-  }
   @Input()
-  set validateOnChange(value: boolean) {
-    this.validateOnChangeValue = coerceBooleanProperty(value);
-  }
+  @coerceBoolean()
+  readonly: boolean;
+
+  @Input()
+  @coerceBoolean()
+  validateContent: boolean;
+
+  @Input()
+  @coerceBoolean()
+  validateOnChange: boolean;
+
+  @Input()
+  @coerceBoolean()
+  required: boolean;
 
   fullscreen = false;
 
@@ -113,7 +113,8 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
 
   constructor(public elementRef: ElementRef,
               protected store: Store<AppState>,
-              private raf: RafService) {
+              private raf: RafService,
+              private cd: ChangeDetectorRef) {
   }
 
   ngOnInit(): void {
@@ -122,7 +123,7 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
     if (this.contentType) {
       mode = contentTypesMap.get(this.contentType).code;
     }
-    let editorOptions: Partial<ace.Ace.EditorOptions> = {
+    let editorOptions: Partial<Ace.EditorOptions> = {
       mode: `ace/mode/${mode}`,
       showGutter: true,
       showPrintMargin: false,
@@ -136,22 +137,75 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
     };
 
     editorOptions = {...editorOptions, ...advancedOptions};
-    this.jsonEditor = ace.edit(editorElement, editorOptions);
-    this.jsonEditor.session.setUseWrapMode(true);
-    this.jsonEditor.setValue(this.contentBody ? this.contentBody : '', -1);
-    this.jsonEditor.on('change', () => {
-      this.cleanupJsonErrors();
-      this.updateView();
-    });
-    this.editorResize$ = new ResizeObserver(() => {
-      this.onAceEditorResize();
-    });
-    this.editorResize$.observe(editorElement);
+    getAce().subscribe(
+      (ace) => {
+        this.jsonEditor = ace.edit(editorElement, editorOptions);
+        this.jsonEditor.session.setUseWrapMode(true);
+        this.jsonEditor.setValue(this.contentBody ? this.contentBody : '', -1);
+        this.jsonEditor.setReadOnly(this.disabled || this.readonly);
+        this.jsonEditor.on('change', () => {
+          if (!this.ignoreChange) {
+            this.cleanupJsonErrors();
+            this.updateView();
+          }
+        });
+        if (this.validateContent) {
+          this.jsonEditor.on('blur', () => {
+            this.contentValid = this.doValidate(true);
+            this.cd.markForCheck();
+          });
+        }
+
+        if (this.tbPlaceholder && this.tbPlaceholder.length) {
+          this.createPlaceholder();
+        }
+        this.editorResize$ = new ResizeObserver(() => {
+          this.onAceEditorResize();
+        });
+        this.editorResize$.observe(editorElement);
+      }
+    );
+  }
+
+  private createPlaceholder() {
+    this.jsonEditor.on('input', this.updateEditorPlaceholder.bind(this));
+    setTimeout(this.updateEditorPlaceholder.bind(this), 100);
+  }
+
+  private updateEditorPlaceholder() {
+    const shouldShow = !this.jsonEditor.session.getValue().length;
+    let node: HTMLElement = (this.jsonEditor.renderer as any).emptyMessageNode;
+    if (!shouldShow && node) {
+      this.jsonEditor.renderer.getMouseEventTarget().removeChild(node);
+      (this.jsonEditor.renderer as any).emptyMessageNode = null;
+    } else if (shouldShow && !node) {
+      const placeholderElement = $('<textarea></textarea>');
+      placeholderElement.text(this.tbPlaceholder);
+      placeholderElement.addClass('ace_invisible ace_emptyMessage');
+      placeholderElement.css({
+        padding: '0 9px',
+        width: '100%',
+        border: 'none',
+        textWrap: 'nowrap',
+        whiteSpace: 'pre',
+        overflow: 'hidden',
+        resize: 'none',
+        fontSize: '15px'
+      });
+      const rows = this.tbPlaceholder.split('\n').length;
+      placeholderElement.attr('rows', rows);
+      node = placeholderElement[0];
+      (this.jsonEditor.renderer as any).emptyMessageNode = node;
+      this.jsonEditor.renderer.getMouseEventTarget().appendChild(node);
+    }
   }
 
   ngOnDestroy(): void {
     if (this.editorResize$) {
       this.editorResize$.disconnect();
+    }
+    if (this.jsonEditor) {
+      this.jsonEditor.destroy();
     }
   }
 
@@ -197,7 +251,7 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
     }
   }
 
-  public validate(c: FormControl) {
+  public validate(c: UntypedFormControl) {
     return (this.contentValid) ? null : {
       contentBody: {
         valid: false,
@@ -210,34 +264,37 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
       this.cleanupJsonErrors();
       this.contentValid = true;
       this.propagateChange(this.contentBody);
-      this.contentValid = this.doValidate();
+      this.contentValid = this.doValidate(true);
       this.propagateChange(this.contentBody);
+      this.cd.markForCheck();
     }
   }
 
-  private doValidate(): boolean {
+  private doValidate(showErrorToast = false): boolean {
     try {
-      if (this.validateContent && this.contentType === ContentType.JSON) {
+      if (this.contentType === ContentType.JSON) {
         JSON.parse(this.contentBody);
       }
       return true;
     } catch (ex) {
-      let errorInfo = 'Error:';
-      if (ex.name) {
-        errorInfo += ' ' + ex.name + ':';
+      if (showErrorToast) {
+        let errorInfo = 'Error:';
+        if (ex.name) {
+          errorInfo += ' ' + ex.name + ':';
+        }
+        if (ex.message) {
+          errorInfo += ' ' + ex.message;
+        }
+        this.store.dispatch(new ActionNotificationShow(
+          {
+            message: errorInfo,
+            type: 'error',
+            target: this.toastTargetId,
+            verticalPosition: 'bottom',
+            horizontalPosition: 'left'
+          }));
+        this.errorShowed = true;
       }
-      if (ex.message) {
-        errorInfo += ' ' + ex.message;
-      }
-      this.store.dispatch(new ActionNotificationShow(
-        {
-          message: errorInfo,
-          type: 'error',
-          target: this.toastTargetId,
-          verticalPosition: 'bottom',
-          horizontalPosition: 'left'
-        }));
-      this.errorShowed = true;
       return false;
     }
   }
@@ -256,8 +313,9 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
     this.contentBody = value;
     this.contentValid = true;
     if (this.jsonEditor) {
+      this.ignoreChange = true;
       this.jsonEditor.setValue(this.contentBody ? this.contentBody : '', -1);
-      // this.jsonEditor.
+      this.ignoreChange = false;
     }
   }
 
@@ -267,13 +325,17 @@ export class JsonContentComponent implements OnInit, ControlValueAccessor, Valid
       this.contentBody = editorValue;
       this.contentValid = !this.validateOnChange || this.doValidate();
       this.propagateChange(this.contentBody);
+      this.cd.markForCheck();
     }
   }
 
   beautifyJSON() {
-    const res = js_beautify(this.contentBody, {indent_size: 4, wrap_line_length: 60});
-    this.jsonEditor.setValue(res ? res : '', -1);
-    this.updateView();
+    beautifyJs(this.contentBody, {indent_size: 4, wrap_line_length: 60}).subscribe(
+      (res) => {
+        this.jsonEditor.setValue(res ? res : '', -1);
+        this.updateView();
+      }
+    );
   }
 
   minifyJSON() {

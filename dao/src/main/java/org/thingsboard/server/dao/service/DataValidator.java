@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,18 @@ package org.thingsboard.server.dao.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FileUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.thingsboard.server.common.data.BaseData;
+import org.thingsboard.server.common.data.EntityType;
+import org.thingsboard.server.common.data.StringUtils;
+import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.id.TenantId;
+import org.thingsboard.server.dao.TenantEntityWithDataDao;
 import org.thingsboard.server.dao.exception.DataValidationException;
+import org.thingsboard.server.dao.exception.EntitiesLimitException;
+import org.thingsboard.server.dao.usagerecord.ApiLimitService;
 
 import java.util.HashSet;
 import java.util.Iterator;
@@ -31,22 +40,37 @@ import java.util.regex.Pattern;
 @Slf4j
 public abstract class DataValidator<D extends BaseData<?>> {
     private static final Pattern EMAIL_PATTERN =
-            Pattern.compile("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("^[A-Z0-9_!#$%&'*+/=?`{|}~^.-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
 
-    public void validate(D data, Function<D, TenantId> tenantIdFunction) {
+    private static final Pattern QUEUE_PATTERN = Pattern.compile("^[a-zA-Z0-9_.\\-]+$");
+
+    private static final String NAME = "name";
+    private static final String TOPIC = "topic";
+
+    @Autowired @Lazy
+    private ApiLimitService apiLimitService;
+
+    // Returns old instance of the same object that is fetched during validation.
+    public D validate(D data, Function<D, TenantId> tenantIdFunction) {
         try {
             if (data == null) {
                 throw new DataValidationException("Data object can't be null!");
             }
+
+            ConstraintValidator.validateFields(data);
+
             TenantId tenantId = tenantIdFunction.apply(data);
             validateDataImpl(tenantId, data);
+            D old;
             if (data.getId() == null) {
                 validateCreate(tenantId, data);
+                old = null;
             } else {
-                validateUpdate(tenantId, data);
+                old = validateUpdate(tenantId, data);
             }
+            return old;
         } catch (DataValidationException e) {
-            log.error("Data object is invalid: [{}]", e.getMessage());
+            log.error("{} object is invalid: [{}]", data == null ? "Data" : data.getClass().getSimpleName(), e.getMessage());
             throw e;
         }
     }
@@ -57,7 +81,20 @@ public abstract class DataValidator<D extends BaseData<?>> {
     protected void validateCreate(TenantId tenantId, D data) {
     }
 
-    protected void validateUpdate(TenantId tenantId, D data) {
+    protected D validateUpdate(TenantId tenantId, D data) {
+        return null;
+    }
+
+    public void validateDelete(TenantId tenantId, EntityId entityId) {
+    }
+
+    public void validateString(String exceptionPrefix, String name) {
+        if (StringUtils.isEmpty(name) || name.trim().length() == 0) {
+            throw new DataValidationException(exceptionPrefix + " should be specified!");
+        }
+        if (StringUtils.contains0x00(name)) {
+            throw new DataValidationException(exceptionPrefix + " should not contain 0x00 symbol!");
+        }
     }
 
     protected boolean isSameData(D existentData, D actualData) {
@@ -70,13 +107,32 @@ public abstract class DataValidator<D extends BaseData<?>> {
         }
     }
 
-    private static boolean doValidateEmail(String email) {
+    public static boolean doValidateEmail(String email) {
         if (email == null) {
             return false;
         }
 
         Matcher emailMatcher = EMAIL_PATTERN.matcher(email);
         return emailMatcher.matches();
+    }
+
+    protected void validateNumberOfEntitiesPerTenant(TenantId tenantId,
+                                                     EntityType entityType) {
+        if (!apiLimitService.checkEntitiesLimit(tenantId, entityType)) {
+            throw new EntitiesLimitException(tenantId, entityType);
+        }
+    }
+
+    protected void validateMaxSumDataSizePerTenant(TenantId tenantId,
+                                                   TenantEntityWithDataDao dataDao,
+                                                   long maxSumDataSize,
+                                                   long currentDataSize,
+                                                   EntityType entityType) {
+        if (maxSumDataSize > 0) {
+            if (dataDao.sumDataSizeByTenantId(tenantId) + currentDataSize > maxSumDataSize) {
+                throw new DataValidationException(String.format("%ss total size exceeds the maximum of " + FileUtils.byteCountToDisplaySize(maxSumDataSize), entityType.getNormalName()));
+            }
+        }
     }
 
     protected static void validateJsonStructure(JsonNode expectedNode, JsonNode actualNode) {
@@ -96,4 +152,23 @@ public abstract class DataValidator<D extends BaseData<?>> {
             throw new DataValidationException("Provided json structure is different from stored one '" + actualNode + "'!");
         }
     }
+
+    protected static void validateQueueName(String name) {
+        validateQueueNameOrTopic(name, NAME);
+    }
+
+    protected static void validateQueueTopic(String topic) {
+        validateQueueNameOrTopic(topic, TOPIC);
+    }
+
+    static void validateQueueNameOrTopic(String value, String fieldName) {
+        if (StringUtils.isEmpty(value) || value.trim().length() == 0) {
+            throw new DataValidationException(String.format("Queue %s should be specified!", fieldName));
+        }
+        if (!QUEUE_PATTERN.matcher(value).matches()) {
+            throw new DataValidationException(
+                    String.format("Queue %s contains a character other than ASCII alphanumerics, '.', '_' and '-'!", fieldName));
+        }
+    }
+
 }

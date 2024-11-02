@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package org.thingsboard.rule.engine.mqtt;
 
 import lombok.Data;
 import org.thingsboard.rule.engine.api.NodeConfiguration;
-import org.thingsboard.rule.engine.mqtt.credentials.AnonymousCredentials;
-import org.thingsboard.rule.engine.mqtt.credentials.MqttClientCredentials;
+import org.thingsboard.rule.engine.credentials.AnonymousCredentials;
+import org.thingsboard.rule.engine.credentials.ClientCredentials;
 
 @Data
 public class TbMqttNodeConfiguration implements NodeConfiguration<TbMqttNodeConfiguration> {
@@ -28,20 +28,24 @@ public class TbMqttNodeConfiguration implements NodeConfiguration<TbMqttNodeConf
     private int port;
     private int connectTimeoutSec;
     private String clientId;
+    private boolean appendClientIdSuffix;
+    private boolean retainedMessage;
 
     private boolean cleanSession;
     private boolean ssl;
-    private MqttClientCredentials credentials;
+    private boolean parseToPlainText;
+    private ClientCredentials credentials;
 
     @Override
     public TbMqttNodeConfiguration defaultConfiguration() {
         TbMqttNodeConfiguration configuration = new TbMqttNodeConfiguration();
         configuration.setTopicPattern("my-topic");
-        configuration.setHost("localhost");
         configuration.setPort(1883);
         configuration.setConnectTimeoutSec(10);
         configuration.setCleanSession(true);
         configuration.setSsl(false);
+        configuration.setRetainedMessage(false);
+        configuration.setParseToPlainText(false);
         configuration.setCredentials(new AnonymousCredentials());
         return configuration;
     }

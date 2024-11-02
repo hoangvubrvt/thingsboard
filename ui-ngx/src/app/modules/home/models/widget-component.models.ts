@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import {
   DataSet,
   Datasource,
   DatasourceData,
+  FormattedData,
+  fullWidgetTypeFqn,
   JsonSettingsSchema,
   Widget,
   WidgetActionDescriptor,
@@ -28,6 +30,8 @@ import {
   WidgetType,
   widgetType,
   WidgetTypeDescriptor,
+  WidgetTypeDetails,
+  widgetTypeFqn,
   WidgetTypeParameters
 } from '@shared/models/widget.models';
 import { Timewindow, WidgetTimewindow } from '@shared/models/time/time.models';
@@ -37,19 +41,26 @@ import {
   IWidgetSubscription,
   IWidgetUtils,
   RpcApi,
+  StateParams,
   SubscriptionEntityInfo,
   TimewindowFunctions,
   WidgetActionsApi,
   WidgetSubscriptionApi
 } from '@core/api/widget-api.models';
-import { ChangeDetectorRef, ComponentFactory, Injector, NgZone, Type } from '@angular/core';
+import { ChangeDetectorRef, InjectionToken, Injector, NgZone, TemplateRef, Type } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RafService } from '@core/services/raf.service';
 import { WidgetTypeId } from '@shared/models/id/widget-type-id';
 import { TenantId } from '@shared/models/id/tenant-id';
 import { WidgetLayout } from '@shared/models/dashboard.models';
-import { formatValue, isDefined } from '@core/utils';
-import { forkJoin, of } from 'rxjs';
+import {
+  createLabelFromDatasource,
+  createLabelFromSubscriptionEntityInfo,
+  formatValue,
+  getEntityDetailsPageURL,
+  hasDatasourceLabelsVariables,
+  isDefined
+} from '@core/utils';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import {
@@ -71,10 +82,29 @@ import { EntityRelationService } from '@core/http/entity-relation.service';
 import { EntityService } from '@core/http/entity.service';
 import { DialogService } from '@core/services/dialog.service';
 import { CustomDialogService } from '@home/components/widget/dialog/custom-dialog.service';
+import { AuthService } from '@core/auth/auth.service';
+import { ResourceService } from '@core/http/resource.service';
+import { TelemetryWebsocketService } from '@core/ws/telemetry-websocket.service';
 import { DatePipe } from '@angular/common';
 import { TranslateService } from '@ngx-translate/core';
-import { PageLink } from '@shared/models/page/page-link';
+import { PageLink, TimePageLink } from '@shared/models/page/page-link';
 import { SortOrder } from '@shared/models/page/sort-order';
+import { DomSanitizer } from '@angular/platform-browser';
+import { Router } from '@angular/router';
+import { EdgeService } from '@core/http/edge.service';
+import * as RxJS from 'rxjs';
+import { BehaviorSubject, Observable } from 'rxjs';
+import * as RxJSOperators from 'rxjs/operators';
+import { TbPopoverComponent } from '@shared/components/popover.component';
+import { EntityId } from '@shared/models/id/entity-id';
+import { AlarmQuery, AlarmSearchStatus, AlarmStatus } from '@app/shared/models/alarm.models';
+import { ImagePipe } from '@shared/pipe/image.pipe';
+import { MillisecondsToTimeStringPipe } from '@shared/pipe/milliseconds-to-time-string.pipe';
+import { SharedTelemetrySubscriber, TelemetrySubscriber } from '@shared/models/telemetry/telemetry.models';
+import { UserId } from '@shared/models/id/user-id';
+import { UserSettingsService } from '@core/http/user-settings.service';
+import { DataKeySettingsFunction } from '@home/components/widget/config/data-keys.component.models';
+import { UtilsService } from '@core/services/utils.service';
 
 export interface IWidgetAction {
   name: string;
@@ -82,9 +112,13 @@ export interface IWidgetAction {
   onAction: ($event: Event) => void;
 }
 
+export type ShowWidgetHeaderActionFunction = (ctx: WidgetContext, data: FormattedData[]) => boolean;
+
 export interface WidgetHeaderAction extends IWidgetAction {
   displayName: string;
   descriptor: WidgetActionDescriptor;
+  useShowWidgetHeaderActionFunction: boolean;
+  showWidgetHeaderActionFunction: ShowWidgetHeaderActionFunction;
 }
 
 export interface WidgetAction extends IWidgetAction {
@@ -92,17 +126,19 @@ export interface WidgetAction extends IWidgetAction {
 }
 
 export interface IDashboardWidget {
-  updateWidgetParams();
+  updateWidgetParams(): void;
 }
 
 export class WidgetContext {
 
   constructor(public dashboard: IDashboardComponent,
               private dashboardWidget: IDashboardWidget,
-              private widget: Widget) {}
+              private widget: Widget,
+              public parentDashboard?: IDashboardComponent,
+              public popoverComponent?: TbPopoverComponent) {}
 
   get stateController(): IStateController {
-    return this.dashboard.stateController;
+    return this.parentDashboard ? this.parentDashboard.stateController : this.dashboard.stateController;
   }
 
   get aliasController(): IAliasController {
@@ -133,6 +169,10 @@ export class WidgetContext {
     this.changeDetectorValue = cd;
   }
 
+  set containerChangeDetector(cd: ChangeDetectorRef) {
+    this.containerChangeDetectorValue = cd;
+  }
+
   get currentUser(): AuthUser {
     if (this.store) {
       return getCurrentAuthUser(this.store);
@@ -141,9 +181,19 @@ export class WidgetContext {
     }
   }
 
+  get dashboardPageElement(): HTMLElement {
+    return this.dashboard?.stateController?.dashboardCtrl?.elRef?.nativeElement;
+  }
+
+  get dashboardContentElement(): HTMLElement {
+    return this.dashboard?.stateController?.dashboardCtrl?.dashboardContent?.nativeElement;
+  }
+
+  authService: AuthService;
   deviceService: DeviceService;
   assetService: AssetService;
   entityViewService: EntityViewService;
+  edgeService: EdgeService;
   customerService: CustomerService;
   dashboardService: DashboardService;
   userService: UserService;
@@ -152,17 +202,29 @@ export class WidgetContext {
   entityService: EntityService;
   dialogs: DialogService;
   customDialog: CustomDialogService;
+  resourceService: ResourceService;
+  userSettingsService: UserSettingsService;
+  utilsService: UtilsService;
+  telemetryWsService: TelemetryWebsocketService;
+  telemetrySubscribers?: Array<TelemetrySubscriber | SharedTelemetrySubscriber>;
   date: DatePipe;
+  imagePipe: ImagePipe;
+  milliSecondsToTimeString: MillisecondsToTimeStringPipe;
   translate: TranslateService;
   http: HttpClient;
+  sanitizer: DomSanitizer;
+  router: Router;
 
   private changeDetectorValue: ChangeDetectorRef;
+  private containerChangeDetectorValue: ChangeDetectorRef;
 
   inited = false;
   destroyed = false;
 
   subscriptions: {[id: string]: IWidgetSubscription} = {};
   defaultSubscription: IWidgetSubscription = null;
+
+  labelPatterns = new Map<Observable<string>, LabelVariablePattern>();
 
   timewindowFunctions: TimewindowFunctions = {
     onUpdateTimewindow: (startTimeMs, endTimeMs, interval) => {
@@ -178,33 +240,46 @@ export class WidgetContext {
   };
 
   controlApi: RpcApi = {
-    sendOneWayCommand: (method, params, timeout) => {
+    sendOneWayCommand: (method, params, timeout, persistent,
+                        retries, additionalInfo, requestUUID) => {
       if (this.defaultSubscription) {
-        return this.defaultSubscription.sendOneWayCommand(method, params, timeout);
+        return this.defaultSubscription.sendOneWayCommand(method, params, timeout, persistent, retries, additionalInfo, requestUUID);
       } else {
-        return of(null);
+        return RxJS.of(null);
       }
     },
-    sendTwoWayCommand: (method, params, timeout) => {
+    sendTwoWayCommand: (method, params, timeout, persistent,
+                        retries, additionalInfo, requestUUID) => {
       if (this.defaultSubscription) {
-        return this.defaultSubscription.sendTwoWayCommand(method, params, timeout);
+        return this.defaultSubscription.sendTwoWayCommand(method, params, timeout, persistent, retries, additionalInfo, requestUUID);
       } else {
-        return of(null);
+        return RxJS.of(null);
+      }
+    },
+    completedCommand: () => {
+      if (this.defaultSubscription) {
+        return this.defaultSubscription.completedCommand();
+      } else {
+        return RxJS.of(null);
       }
     }
   };
 
   utils: IWidgetUtils = {
-    formatValue
+    formatValue,
+    getEntityDetailsPageURL
   };
 
+  $widgetElement: JQuery<HTMLElement>;
   $container: JQuery<HTMLElement>;
   $containerParent: JQuery<HTMLElement>;
   width: number;
   height: number;
   $scope: IDynamicWidgetComponent;
   isEdit: boolean;
+  isPreview: boolean;
   isMobile: boolean;
+  toastTargetId: string;
 
   widgetNamespace?: string;
   subscriptionApi?: WidgetSubscriptionApi;
@@ -214,8 +289,12 @@ export class WidgetContext {
 
   datasources?: Array<Datasource>;
   data?: Array<DatasourceData>;
+  latestData?: Array<DatasourceData>;
   hiddenData?: Array<{data: DataSet}>;
   timeWindow?: WidgetTimewindow;
+
+  embedTitlePanel?: boolean;
+  overflowVisible?: boolean;
 
   hideTitlePanel = false;
 
@@ -232,43 +311,85 @@ export class WidgetContext {
 
   store?: Store<AppState>;
 
+  private popoverComponents: TbPopoverComponent[] = [];
+
   rxjs = {
-    forkJoin,
-    of
+
+    ...RxJS,
+    ...RxJSOperators
   };
+
+  registerPopoverComponent(popoverComponent: TbPopoverComponent) {
+    this.popoverComponents.push(popoverComponent);
+    popoverComponent.tbDestroy.subscribe(() => {
+      const index = this.popoverComponents.indexOf(popoverComponent, 0);
+      if (index > -1) {
+        this.popoverComponents.splice(index, 1);
+      }
+    });
+  }
+
+  updatePopoverPositions() {
+    this.popoverComponents.forEach(comp => {
+      comp.updatePosition();
+    });
+  }
+
+  setPopoversHidden(hidden: boolean) {
+    this.popoverComponents.forEach(comp => {
+      comp.tbHidden = hidden;
+    });
+  }
+
+  registerLabelPattern(label: string, label$: Observable<string>): Observable<string> {
+    let labelPattern = label$ ? this.labelPatterns.get(label$) : null;
+    if (labelPattern) {
+      labelPattern.setupPattern(label);
+    } else {
+      labelPattern = new LabelVariablePattern(label, this);
+      this.labelPatterns.set(labelPattern.label$, labelPattern);
+    }
+    return labelPattern.label$;
+  }
+
+  updateLabelPatterns() {
+    for (const labelPattern of this.labelPatterns.values()) {
+      labelPattern.update();
+    }
+  }
 
   showSuccessToast(message: string, duration: number = 1000,
                    verticalPosition: NotificationVerticalPosition = 'bottom',
                    horizontalPosition: NotificationHorizontalPosition = 'left',
-                   target?: string) {
-    this.showToast('success', message, duration, verticalPosition, horizontalPosition, target);
+                   target: string = 'dashboardRoot', modern = false) {
+    this.showToast('success', message, duration, verticalPosition, horizontalPosition, target, modern);
   }
 
   showInfoToast(message: string,
-                  verticalPosition: NotificationVerticalPosition = 'bottom',
-                  horizontalPosition: NotificationHorizontalPosition = 'left',
-                  target?: string) {
-    this.showToast('info', message, undefined, verticalPosition, horizontalPosition, target);
+                verticalPosition: NotificationVerticalPosition = 'bottom',
+                horizontalPosition: NotificationHorizontalPosition = 'left',
+                target: string = 'dashboardRoot', modern = false) {
+    this.showToast('info', message, undefined, verticalPosition, horizontalPosition, target, modern);
   }
 
   showWarnToast(message: string,
                 verticalPosition: NotificationVerticalPosition = 'bottom',
                 horizontalPosition: NotificationHorizontalPosition = 'left',
-                target?: string) {
-    this.showToast('warn', message, undefined, verticalPosition, horizontalPosition, target);
+                target: string = 'dashboardRoot', modern = false) {
+    this.showToast('warn', message, undefined, verticalPosition, horizontalPosition, target, modern);
   }
 
   showErrorToast(message: string,
                  verticalPosition: NotificationVerticalPosition = 'bottom',
                  horizontalPosition: NotificationHorizontalPosition = 'left',
-                 target?: string) {
-    this.showToast('error', message, undefined, verticalPosition, horizontalPosition, target);
+                 target: string = 'dashboardRoot', modern = false) {
+    this.showToast('error', message, undefined, verticalPosition, horizontalPosition, target, modern);
   }
 
   showToast(type: NotificationType, message: string, duration: number,
             verticalPosition: NotificationVerticalPosition = 'bottom',
             horizontalPosition: NotificationHorizontalPosition = 'left',
-            target?: string) {
+            target: string = 'dashboardRoot', modern = false) {
     this.store.dispatch(new ActionNotificationShow(
       {
         message,
@@ -278,7 +399,8 @@ export class WidgetContext {
         horizontalPosition,
         target,
         panelClass: this.widgetNamespace,
-        forceDismiss: true
+        forceDismiss: true,
+        modern
       }));
   }
 
@@ -295,7 +417,29 @@ export class WidgetContext {
         this.dashboardWidget.updateWidgetParams();
       }
       try {
-        this.changeDetectorValue.detectChanges();
+        if (this.ngZone) {
+          this.ngZone.run(() => {
+            this.changeDetectorValue?.detectChanges();
+          });
+        } else {
+          this.changeDetectorValue?.detectChanges();
+        }
+      } catch (e) {
+        // console.log(e);
+      }
+    }
+  }
+
+  detectContainerChanges() {
+    if (!this.destroyed) {
+      try {
+        if (this.ngZone) {
+          this.ngZone.run(() => {
+            this.containerChangeDetectorValue?.detectChanges();
+          });
+        } else {
+          this.containerChangeDetectorValue?.detectChanges();
+        }
       } catch (e) {
         // console.log(e);
       }
@@ -321,10 +465,82 @@ export class WidgetContext {
     this.widgetActions = undefined;
   }
 
+  destroy() {
+    for (const labelPattern of this.labelPatterns.values()) {
+      labelPattern.destroy();
+    }
+    this.labelPatterns.clear();
+    this.width = undefined;
+    this.height = undefined;
+    this.destroyed = true;
+  }
+
+  closeDialog(resultData: any = null) {
+    const dialogRef = this.$scope.dialogRef || this.stateController.dashboardCtrl.dashboardCtx.getDashboard().dialogRef;
+    if (dialogRef) {
+      dialogRef.close(resultData);
+    }
+  }
+
   pageLink(pageSize: number, page: number = 0, textSearch: string = null, sortOrder: SortOrder = null): PageLink {
     return new PageLink(pageSize, page, textSearch, sortOrder);
-  };
+  }
+
+  timePageLink(startTime: number, endTime: number, pageSize: number, page: number = 0,
+               textSearch: string = null, sortOrder: SortOrder = null) {
+    return new TimePageLink(pageSize, page, textSearch, sortOrder, startTime, endTime);
+  }
+
+  alarmQuery(entityId: EntityId, pageLink: TimePageLink, searchStatus: AlarmSearchStatus,
+             status: AlarmStatus, fetchOriginator: boolean, assigneeId: UserId) {
+    return new AlarmQuery(entityId, pageLink, searchStatus, status, fetchOriginator, assigneeId);
+  }
 }
+
+export class LabelVariablePattern {
+
+  private pattern: string;
+  private hasVariables: boolean;
+
+  private labelSubject = new BehaviorSubject<string>('');
+
+  public label$ = this.labelSubject.asObservable();
+
+  constructor(label: string,
+              private ctx: WidgetContext) {
+    this.setupPattern(label);
+  }
+
+  setupPattern(label: string) {
+    this.pattern = this.ctx.dashboard.utils.customTranslation(label, label);
+    this.hasVariables = hasDatasourceLabelsVariables(this.pattern);
+    this.update();
+  }
+
+  update() {
+    let label = this.pattern;
+    if (this.hasVariables) {
+      if (this.ctx.defaultSubscription?.type === widgetType.rpc) {
+        const entityInfo = this.ctx.defaultSubscription.getFirstEntityInfo();
+        label = createLabelFromSubscriptionEntityInfo(entityInfo, label);
+      } else {
+        const datasource = this.ctx.defaultSubscription?.firstDatasource;
+        label = createLabelFromDatasource(datasource, label);
+      }
+    }
+    if (this.labelSubject.value !== label) {
+      this.labelSubject.next(label);
+    }
+  }
+
+  destroy() {
+    this.labelSubject.complete();
+  }
+}
+
+export const widgetContextToken = new InjectionToken<WidgetContext>('widgetContext');
+export const widgetErrorMessagesToken = new InjectionToken<string[]>('errorMessages');
+export const widgetTitlePanelToken = new InjectionToken<TemplateRef<any>>('widgetTitlePanel');
 
 export interface IDynamicWidgetComponent {
   readonly ctx: WidgetContext;
@@ -333,20 +549,27 @@ export interface IDynamicWidgetComponent {
   executingRpcRequest: boolean;
   rpcEnabled: boolean;
   rpcErrorText: string;
-  rpcRejection: HttpErrorResponse;
+  rpcRejection: HttpErrorResponse | Error;
   raf: RafService;
   [key: string]: any;
 }
 
 export interface WidgetInfo extends WidgetTypeDescriptor, WidgetControllerDescriptor {
   widgetName: string;
-  alias: string;
+  fullFqn: string;
+  deprecated: boolean;
+  scada: boolean;
   typeSettingsSchema?: string | any;
   typeDataKeySettingsSchema?: string | any;
-  componentFactory?: ComponentFactory<IDynamicWidgetComponent>;
+  typeLatestDataKeySettingsSchema?: string | any;
+  image?: string;
+  description?: string;
+  tags?: string[];
+  componentType?: Type<IDynamicWidgetComponent>;
 }
 
 export interface WidgetConfigComponentData {
+  widgetName: string;
   config: WidgetConfig;
   layout: WidgetLayout;
   widgetType: widgetType;
@@ -355,12 +578,21 @@ export interface WidgetConfigComponentData {
   isDataEnabled: boolean;
   settingsSchema: JsonSettingsSchema;
   dataKeySettingsSchema: JsonSettingsSchema;
+  latestDataKeySettingsSchema: JsonSettingsSchema;
+  dataKeySettingsFunction: DataKeySettingsFunction;
+  settingsDirective: string;
+  dataKeySettingsDirective: string;
+  latestDataKeySettingsDirective: string;
+  hasBasicMode: boolean;
+  basicModeDirective: string;
 }
 
 export const MissingWidgetType: WidgetInfo = {
   type: widgetType.latest,
   widgetName: 'Widget type not found',
-  alias: 'undefined',
+  fullFqn: 'undefined',
+  deprecated: false,
+  scada: false,
   sizeX: 8,
   sizeY: 6,
   resources: [],
@@ -371,6 +603,8 @@ export const MissingWidgetType: WidgetInfo = {
   controllerScript: 'self.onInit = function() {}',
   settingsSchema: '{}\n',
   dataKeySettingsSchema: '{}\n',
+  image: null,
+  description: null,
   defaultConfig: '{\n' +
     '"title": "Widget type not found",\n' +
     '"datasources": [],\n' +
@@ -382,7 +616,9 @@ export const MissingWidgetType: WidgetInfo = {
 export const ErrorWidgetType: WidgetInfo = {
   type: widgetType.latest,
   widgetName: 'Error loading widget',
-  alias: 'error',
+  fullFqn: 'error',
+  deprecated: false,
+  scada: false,
   sizeX: 8,
   sizeY: 6,
   resources: [],
@@ -394,6 +630,8 @@ export const ErrorWidgetType: WidgetInfo = {
   controllerScript: 'self.onInit = function() {}',
   settingsSchema: '{}\n',
   dataKeySettingsSchema: '{}\n',
+  image: null,
+  description: null,
   defaultConfig: '{\n' +
     '"title": "Widget failed to load",\n' +
     '"datasources": [],\n' +
@@ -405,36 +643,53 @@ export const ErrorWidgetType: WidgetInfo = {
 export interface WidgetTypeInstance {
   getSettingsSchema?: () => string;
   getDataKeySettingsSchema?: () => string;
+  getLatestDataKeySettingsSchema?: () => string;
   typeParameters?: () => WidgetTypeParameters;
   useCustomDatasources?: () => boolean;
   actionSources?: () => {[actionSourceId: string]: WidgetActionSource};
 
   onInit?: () => void;
   onDataUpdated?: () => void;
+  onLatestDataUpdated?: () => void;
   onResize?: () => void;
   onEditModeChanged?: () => void;
   onMobileModeChanged?: () => void;
   onDestroy?: () => void;
 }
 
-export function toWidgetInfo(widgetTypeEntity: WidgetType): WidgetInfo {
-  return {
-    widgetName: widgetTypeEntity.name,
-    alias: widgetTypeEntity.alias,
-    type: widgetTypeEntity.descriptor.type,
-    sizeX: widgetTypeEntity.descriptor.sizeX,
-    sizeY: widgetTypeEntity.descriptor.sizeY,
-    resources: widgetTypeEntity.descriptor.resources,
-    templateHtml: widgetTypeEntity.descriptor.templateHtml,
-    templateCss: widgetTypeEntity.descriptor.templateCss,
-    controllerScript: widgetTypeEntity.descriptor.controllerScript,
-    settingsSchema: widgetTypeEntity.descriptor.settingsSchema,
-    dataKeySettingsSchema: widgetTypeEntity.descriptor.dataKeySettingsSchema,
-    defaultConfig: widgetTypeEntity.descriptor.defaultConfig
-  };
-}
+export const toWidgetInfo = (widgetTypeEntity: WidgetType): WidgetInfo => ({
+  widgetName: widgetTypeEntity.name,
+  fullFqn: fullWidgetTypeFqn(widgetTypeEntity),
+  deprecated: widgetTypeEntity.deprecated,
+  scada: widgetTypeEntity.scada,
+  type: widgetTypeEntity.descriptor.type,
+  sizeX: widgetTypeEntity.descriptor.sizeX,
+  sizeY: widgetTypeEntity.descriptor.sizeY,
+  resources: widgetTypeEntity.descriptor.resources,
+  templateHtml: widgetTypeEntity.descriptor.templateHtml,
+  templateCss: widgetTypeEntity.descriptor.templateCss,
+  controllerScript: widgetTypeEntity.descriptor.controllerScript,
+  settingsSchema: widgetTypeEntity.descriptor.settingsSchema,
+  dataKeySettingsSchema: widgetTypeEntity.descriptor.dataKeySettingsSchema,
+  latestDataKeySettingsSchema: widgetTypeEntity.descriptor.latestDataKeySettingsSchema,
+  settingsDirective: widgetTypeEntity.descriptor.settingsDirective,
+  dataKeySettingsDirective: widgetTypeEntity.descriptor.dataKeySettingsDirective,
+  latestDataKeySettingsDirective: widgetTypeEntity.descriptor.latestDataKeySettingsDirective,
+  hasBasicMode: widgetTypeEntity.descriptor.hasBasicMode,
+  basicModeDirective: widgetTypeEntity.descriptor.basicModeDirective,
+  defaultConfig: widgetTypeEntity.descriptor.defaultConfig
+});
 
-export function toWidgetType(widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId: TenantId, bundleAlias: string): WidgetType {
+export const detailsToWidgetInfo = (widgetTypeDetailsEntity: WidgetTypeDetails): WidgetInfo => {
+  const widgetInfo = toWidgetInfo(widgetTypeDetailsEntity);
+  widgetInfo.image = widgetTypeDetailsEntity.image;
+  widgetInfo.description = widgetTypeDetailsEntity.description;
+  widgetInfo.tags = widgetTypeDetailsEntity.tags;
+  return widgetInfo;
+};
+
+export const toWidgetType = (widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId: TenantId,
+                             createdTime: number, version: number): WidgetType => {
   const descriptor: WidgetTypeDescriptor = {
     type: widgetInfo.type,
     sizeX: widgetInfo.sizeX,
@@ -445,14 +700,58 @@ export function toWidgetType(widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId:
     controllerScript: widgetInfo.controllerScript,
     settingsSchema: widgetInfo.settingsSchema,
     dataKeySettingsSchema: widgetInfo.dataKeySettingsSchema,
+    latestDataKeySettingsSchema: widgetInfo.latestDataKeySettingsSchema,
+    settingsDirective: widgetInfo.settingsDirective,
+    dataKeySettingsDirective: widgetInfo.dataKeySettingsDirective,
+    latestDataKeySettingsDirective: widgetInfo.latestDataKeySettingsDirective,
+    hasBasicMode: widgetInfo.hasBasicMode,
+    basicModeDirective: widgetInfo.basicModeDirective,
     defaultConfig: widgetInfo.defaultConfig
   };
   return {
     id,
     tenantId,
-    bundleAlias,
-    alias: widgetInfo.alias,
+    createdTime,
+    version,
+    fqn: widgetTypeFqn(widgetInfo.fullFqn),
     name: widgetInfo.widgetName,
+    deprecated: widgetInfo.deprecated,
+    scada: widgetInfo.scada,
     descriptor
   };
-}
+};
+
+export const toWidgetTypeDetails = (widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId: TenantId,
+                                    createdTime: number, version: number): WidgetTypeDetails => {
+  const widgetTypeEntity = toWidgetType(widgetInfo, id, tenantId, createdTime, version);
+  return {
+    ...widgetTypeEntity,
+    description: widgetInfo.description,
+    tags: widgetInfo.tags,
+    image: widgetInfo.image
+  };
+};
+
+export const updateEntityParams = (params: StateParams, targetEntityParamName?: string, targetEntityId?: EntityId,
+                                   entityName?: string, entityLabel?: string) => {
+  if (targetEntityId) {
+    let targetEntityParams: StateParams;
+    if (targetEntityParamName && targetEntityParamName.length) {
+      targetEntityParams = params[targetEntityParamName];
+      if (!targetEntityParams) {
+        targetEntityParams = {};
+        params[targetEntityParamName] = targetEntityParams;
+        params.targetEntityParamName = targetEntityParamName;
+      }
+    } else {
+      targetEntityParams = params;
+    }
+    targetEntityParams.entityId = targetEntityId;
+    if (entityName) {
+      targetEntityParams.entityName = entityName;
+    }
+    if (entityLabel) {
+      targetEntityParams.entityLabel = entityLabel;
+    }
+  }
+};

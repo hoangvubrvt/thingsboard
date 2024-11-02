@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,30 @@
  */
 package org.thingsboard.server.common.data.kv;
 
-import java.util.Objects;
+import jakarta.validation.Valid;
+import lombok.Data;
+
 import java.util.Optional;
 
+@Data
 public class BasicTsKvEntry implements TsKvEntry {
-
-    private final long ts;
+    private static final int MAX_CHARS_PER_DATA_POINT = 512;
+    protected final long ts;
+    @Valid
     private final KvEntry kv;
+
+    private final Long version;
 
     public BasicTsKvEntry(long ts, KvEntry kv) {
         this.ts = ts;
         this.kv = kv;
+        this.version = null;
+    }
+
+    public BasicTsKvEntry(long ts, KvEntry kv, Long version) {
+        this.ts = ts;
+        this.kv = kv;
+        this.version = version;
     }
 
     @Override
@@ -69,34 +82,24 @@ public class BasicTsKvEntry implements TsKvEntry {
     }
 
     @Override
-    public long getTs() {
-        return ts;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof BasicTsKvEntry)) return false;
-        BasicTsKvEntry that = (BasicTsKvEntry) o;
-        return getTs() == that.getTs() &&
-                Objects.equals(kv, that.kv);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(getTs(), kv);
-    }
-
-    @Override
-    public String toString() {
-        return "BasicTsKvEntry{" +
-                "ts=" + ts +
-                ", kv=" + kv +
-                '}';
-    }
-
-    @Override
     public String getValueAsString() {
         return kv.getValueAsString();
     }
+
+    @Override
+    public int getDataPoints() {
+        int length;
+        switch (getDataType()) {
+            case STRING:
+                length = getStrValue().get().length();
+                break;
+            case JSON:
+                length = getJsonValue().get().length();
+                break;
+            default:
+                return 1;
+        }
+        return Math.max(1, (length + MAX_CHARS_PER_DATA_POINT - 1) / MAX_CHARS_PER_DATA_POINT);
+    }
+
 }

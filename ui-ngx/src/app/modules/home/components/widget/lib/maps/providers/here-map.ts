@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -16,16 +16,23 @@
 
 import L from 'leaflet';
 import LeafletMap from '../leaflet-map';
-import { UnitedMapSettings } from '../map-models';
+import { DEFAULT_ZOOM_LEVEL, WidgetUnitedMapSettings } from '../map-models';
 import { WidgetContext } from '@home/models/widget-component.models';
+import { isDefinedAndNotNull } from '@core/utils';
 
 export class HEREMap extends LeafletMap {
-    constructor(ctx: WidgetContext, $container, options: UnitedMapSettings) {
+    constructor(ctx: WidgetContext, $container: HTMLElement, options: WidgetUnitedMapSettings) {
         super(ctx, $container, options);
-        const map = L.map($container).setView(options?.defaultCenterPosition, options?.defaultZoomLevel);
-        const tileLayer = (L.tileLayer as any).provider(options.mapProviderHere || 'HERE.normalDay', options.credentials);
+        const map = L.map($container, {
+          doubleClickZoom: !this.options.disableDoubleClickZooming,
+          zoomControl: !this.options.disableZoomControl
+        }).setView(options?.parsedDefaultCenterPosition, options?.defaultZoomLevel || DEFAULT_ZOOM_LEVEL);
+        let provider = options.mapProviderHere || 'HERE.normalDay';
+        if (options.credentials.useV3 && isDefinedAndNotNull(options.credentials.apiKey)) {
+          provider = options.mapProviderHere?.replace('HERE', 'HEREv3') || 'HEREv3.normalDay';
+        }
+        const tileLayer = (L.tileLayer as any).provider(provider, options.credentials);
         tileLayer.addTo(map);
         super.setMap(map);
-        super.initSettings(options);
     }
 }

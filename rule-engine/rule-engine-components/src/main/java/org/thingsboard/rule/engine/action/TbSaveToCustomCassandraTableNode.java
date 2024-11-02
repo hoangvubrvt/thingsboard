@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,17 +28,22 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import jakarta.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
-import org.thingsboard.rule.engine.api.*;
+import org.thingsboard.rule.engine.api.RuleNode;
+import org.thingsboard.rule.engine.api.TbContext;
+import org.thingsboard.rule.engine.api.TbNode;
+import org.thingsboard.rule.engine.api.TbNodeConfiguration;
+import org.thingsboard.rule.engine.api.TbNodeException;
 import org.thingsboard.rule.engine.api.util.TbNodeUtils;
 import org.thingsboard.server.common.data.plugin.ComponentType;
+import org.thingsboard.server.common.data.rule.RuleChainType;
 import org.thingsboard.server.common.msg.TbMsg;
 import org.thingsboard.server.dao.cassandra.CassandraCluster;
 import org.thingsboard.server.dao.cassandra.guava.GuavaSession;
 import org.thingsboard.server.dao.nosql.CassandraStatementTask;
 import org.thingsboard.server.dao.nosql.TbResultSetFuture;
 
-import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -62,11 +67,11 @@ import static org.thingsboard.common.util.DonAsynchron.withCallback;
                 " otherwise, the message will be routed via <b>success</b> chain.",
         uiResources = {"static/rulenode/rulenode-core-config.js"},
         configDirective = "tbActionNodeCustomTableConfig",
-        icon = "file_upload")
+        icon = "file_upload",
+        ruleChainTypes = RuleChainType.CORE)
 public class TbSaveToCustomCassandraTableNode implements TbNode {
 
     private static final String TABLE_PREFIX = "cs_tb_";
-    private static final JsonParser parser = new JsonParser();
     private static final String ENTITY_ID = "$entityId";
 
     private TbSaveToCustomCassandraTableNodeConfiguration config;
@@ -162,7 +167,7 @@ public class TbSaveToCustomCassandraTableNode implements TbNode {
     }
 
     private ListenableFuture<Void> save(TbMsg msg, TbContext ctx) {
-        JsonElement data = parser.parse(msg.getData());
+        JsonElement data = JsonParser.parseString(msg.getData());
         if (!data.isJsonObject()) {
             throw new IllegalStateException("Invalid message structure, it is not a JSON Object:" + data);
         } else {
@@ -173,19 +178,26 @@ public class TbSaveToCustomCassandraTableNode implements TbNode {
                 if (key.equals(ENTITY_ID)) {
                     stmtBuilder.setUuid(i.get(), msg.getOriginator().getId());
                 } else if (dataAsObject.has(key)) {
-                    if (dataAsObject.get(key).isJsonPrimitive()) {
-                        JsonPrimitive primitive = dataAsObject.get(key).getAsJsonPrimitive();
+                    JsonElement dataKeyElement = dataAsObject.get(key);
+                    if (dataKeyElement.isJsonPrimitive()) {
+                        JsonPrimitive primitive = dataKeyElement.getAsJsonPrimitive();
                         if (primitive.isNumber()) {
-                            stmtBuilder.setLong(i.get(), dataAsObject.get(key).getAsLong());
+                            if (primitive.getAsString().contains(".")) {
+                                stmtBuilder.setDouble(i.get(), primitive.getAsDouble());
+                            } else {
+                                stmtBuilder.setLong(i.get(), primitive.getAsLong());
+                            }
                         } else if (primitive.isBoolean()) {
-                            stmtBuilder.setBoolean(i.get(), dataAsObject.get(key).getAsBoolean());
+                            stmtBuilder.setBoolean(i.get(), primitive.getAsBoolean());
                         } else if (primitive.isString()) {
-                            stmtBuilder.setString(i.get(), dataAsObject.get(key).getAsString());
+                            stmtBuilder.setString(i.get(), primitive.getAsString());
                         } else {
                             stmtBuilder.setToNull(i.get());
                         }
+                    } else if (dataKeyElement.isJsonObject()) {
+                        stmtBuilder.setString(i.get(), dataKeyElement.getAsJsonObject().toString());
                     } else {
-                        throw new IllegalStateException("Message data key: '" + key + "' with value: '" + value + "' is not a JSON Primitive!");
+                        throw new IllegalStateException("Message data key: '" + key + "' with value: '" + value + "' is not a JSON Object or JSON Primitive!");
                     }
                 } else {
                     throw new RuntimeException("Message data doesn't contain key: " + "'" + key + "'!");
@@ -207,7 +219,7 @@ public class TbSaveToCustomCassandraTableNode implements TbNode {
         if (statement.getConsistencyLevel() == null) {
             statement.setConsistencyLevel(level);
         }
-        return ctx.submitCassandraTask(new CassandraStatementTask(ctx.getTenantId(), getSession(), statement));
+        return ctx.submitCassandraWriteTask(new CassandraStatementTask(ctx.getTenantId(), getSession(), statement));
     }
 
     private static String statementToString(Statement statement) {

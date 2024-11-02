@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -21,12 +21,10 @@ import { UtilsService } from '@core/services/utils.service';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
 import { isDefined, isNumber } from '@core/utils';
-import { CanvasDigitalGauge, CanvasDigitalGaugeOptions } from '@home/components/widget/lib/canvas-digital-gauge';
-import * as tinycolor_ from 'tinycolor2';
-import { ResizeObserver } from '@juggle/resize-observer';
+import { CanvasDigitalGaugeOptions } from '@home/components/widget/lib/canvas-digital-gauge';
+import tinycolor from 'tinycolor2';
+import { ColorProcessor, gradientColor } from '@shared/models/widget-settings.models';
 import GenericOptions = CanvasGauges.GenericOptions;
-
-const tinycolor = tinycolor_;
 
 interface KnobSettings {
   minValue: number;
@@ -36,6 +34,8 @@ interface KnobSettings {
   getValueMethod: string;
   setValueMethod: string;
   requestTimeout: number;
+  requestPersistent: boolean;
+  persistentPollingInterval: number;
 }
 
 @Component({
@@ -67,6 +67,7 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
   title = '';
   minValue: number;
   maxValue: number;
+  newValue = 0;
 
   private startDeg = -1;
   private currentDeg = 0;
@@ -79,6 +80,8 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
 
   private isSimulated: boolean;
   private requestTimeout: number;
+  private requestPersistent: boolean;
+  private persistentPollingInterval: number;
   private getValueMethod: string;
   private setValueMethod: string;
 
@@ -101,7 +104,7 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
   private textMeasure: JQuery<HTMLElement>;
   private canvasBarElement: HTMLElement;
 
-  private canvasBar: CanvasDigitalGauge;
+  private canvasBar: any; // CanvasDigitalGauge;
 
   private knobResize$: ResizeObserver;
 
@@ -137,6 +140,7 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
     if (this.knobResize$) {
       this.knobResize$.disconnect();
     }
+    this.ctx.controlApi.completedCommand();
   }
 
   private init() {
@@ -154,17 +158,15 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
       neonGlowBrightness: 0,
       gaugeWidthScale: 0.4,
       gaugeColor: 'rgba(0, 0, 0, 0)',
-      levelColors,
       minValue: this.minValue,
       maxValue: this.maxValue,
       gaugeType: 'donut',
       dashThickness: 2,
-      donutStartAngle: 3/4*Math.PI,
-      donutEndAngle: 9/4*Math.PI,
-      animation: false
+      donutStartAngle: 3 / 4 * Math.PI,
+      donutEndAngle: 9 / 4 * Math.PI,
+      animation: false,
+      barColorProcessor: ColorProcessor.fromSettings(gradientColor('rgba(0, 0, 0, 0)', levelColors, this.minValue, this.maxValue), this.ctx)
     };
-
-    this.canvasBar = new CanvasDigitalGauge(canvasBarData).draw();
 
     this.knob.on('click', (e) => {
       if (this.moving) {
@@ -175,16 +177,15 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
 
       const offset = this.knob.offset();
       const center = {
-        y : offset.top + this.knob.height()/2,
-        x: offset.left + this.knob.width()/2
+        y: offset.top + this.knob.height() / 2,
+        x: offset.left + this.knob.width() / 2
       };
-      const rad2deg = 180/Math.PI;
+      const rad2deg = 180 / Math.PI;
       const t: Touch = ((e.originalEvent as any).touches) ? (e.originalEvent as any).touches[0] : e;
-
       const a = center.y - t.pageY;
       const b = center.x - t.pageX;
-      let deg = Math.atan2(a,b)*rad2deg;
-      if(deg < 0){
+      let deg = Math.atan2(a, b) * rad2deg;
+      if (deg < 0) {
         deg = 360 + deg;
       }
       if (deg > this.maxDeg) {
@@ -196,42 +197,45 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
       }
       this.currentDeg = deg;
       this.lastDeg = deg;
-      this.knobTopPointerContainer.css('transform','rotate('+(this.currentDeg)+'deg)');
+      this.knobTopPointerContainer.css('transform', 'rotate(' + (this.currentDeg) + 'deg)');
       this.turn(this.degreeToRatio(this.currentDeg));
       this.rotation = this.currentDeg;
       this.startDeg = -1;
+      this.rpcUpdateValue(this.newValue);
     });
 
+
+
     this.knob.on('mousedown touchstart', (e) => {
+      this.moving  = false;
       e.preventDefault();
       const offset = this.knob.offset();
       const center = {
-        y : offset.top + this.knob.height()/2,
-        x: offset.left + this.knob.width()/2
+        y: offset.top + this.knob.height() / 2,
+        x: offset.left + this.knob.width() / 2
       };
-      const rad2deg = 180/Math.PI;
+      const rad2deg = 180 / Math.PI;
 
-      this.knob.on('mousemove.rem touchmove.rem', (ev) => {
+      $(document).on('mousemove.rem touchmove.rem', (ev) => {
         this.moving = true;
         const t: Touch = ((ev.originalEvent as any).touches) ? (ev.originalEvent as any).touches[0] : ev;
 
         const a = center.y - t.pageY;
         const b = center.x - t.pageX;
-        let deg = Math.atan2(a,b)*rad2deg;
-        if(deg < 0){
+        let deg = Math.atan2(a, b) * rad2deg;
+        if (deg < 0) {
           deg = 360 + deg;
         }
 
-        if(this.startDeg === -1){
+        if (this.startDeg === -1) {
           this.startDeg = deg;
         }
 
-        let tmp = Math.floor((deg-this.startDeg) + this.rotation);
+        let tmp = Math.floor((deg - this.startDeg) + this.rotation);
 
-        if(tmp < 0){
+        if (tmp < 0) {
           tmp = 360 + tmp;
-        }
-        else if(tmp > 359){
+        } else if (tmp > 359) {
           tmp = tmp % 360;
         }
 
@@ -248,7 +252,7 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
             }
           }
         }
-        if(Math.abs(tmp - this.lastDeg) > 180){
+        if (Math.abs(tmp - this.lastDeg) > 180) {
           this.startDeg = deg;
           this.rotation = this.currentDeg;
           return false;
@@ -257,11 +261,14 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
         this.currentDeg = tmp;
         this.lastDeg = tmp;
 
-        this.knobTopPointerContainer.css('transform','rotate('+(this.currentDeg)+'deg)');
+        this.knobTopPointerContainer.css('transform', 'rotate(' + (this.currentDeg) + 'deg)');
         this.turn(this.degreeToRatio(this.currentDeg));
       });
 
-      $(document).on('mouseup.rem  touchend.rem',() => {
+      $(document).on('mouseup.rem  touchend.rem', () => {
+        if (this.newValue !== this.rpcValue && this.moving) {
+          this.rpcUpdateValue(this.newValue);
+        }
         this.knob.off('.rem');
         $(document).off('.rem');
         this.rotation = this.currentDeg;
@@ -269,9 +276,6 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
       });
 
     });
-
-    const initialValue = isDefined(settings.initialValue) ? settings.initialValue : this.minValue;
-    this.setValue(initialValue);
 
     const subscription = this.ctx.defaultSubscription;
     const rpcEnabled = subscription.rpcEnabled;
@@ -282,6 +286,14 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
     if (settings.requestTimeout) {
       this.requestTimeout = settings.requestTimeout;
     }
+    this.requestPersistent = false;
+    if (settings.requestPersistent) {
+      this.requestPersistent = settings.requestPersistent;
+    }
+    this.persistentPollingInterval = 5000;
+    if (settings.persistentPollingInterval) {
+      this.persistentPollingInterval = settings.persistentPollingInterval;
+    }
     this.getValueMethod = 'getValue';
     if (settings.getValueMethod && settings.getValueMethod.length) {
       this.getValueMethod = settings.getValueMethod;
@@ -290,30 +302,39 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
     if (settings.setValueMethod && settings.setValueMethod.length) {
       this.setValueMethod = settings.setValueMethod;
     }
-    if (!rpcEnabled) {
-      this.onError('Target device is not set!');
-    } else {
-      if (!this.isSimulated) {
-        this.rpcRequestValue();
+
+    import('@home/components/widget/lib/canvas-digital-gauge').then(
+      (gauge) => {
+        this.canvasBar = new gauge.CanvasDigitalGauge(canvasBarData).draw();
+        const initialValue = isDefined(settings.initialValue) ? settings.initialValue : this.minValue;
+        this.setValue(initialValue);
+        if (!rpcEnabled) {
+          this.onError('Target device is not set!');
+        } else {
+          if (!this.isSimulated) {
+            this.rpcRequestValue();
+          }
+        }
       }
-    }
+    );
+
   }
 
   private degreeToRatio(degree: number): number {
-    return (degree-this.minDeg)/(this.maxDeg-this.minDeg);
+    return (degree - this.minDeg) / (this.maxDeg - this.minDeg);
   }
 
   private ratioToDegree(ratio: number): number {
-    return this.minDeg + ratio*(this.maxDeg-this.minDeg);
+    return this.minDeg + ratio * (this.maxDeg - this.minDeg);
   }
 
   private turn(ratio: number) {
-    const value = Number((this.minValue + (this.maxValue - this.minValue)*ratio).toFixed(this.ctx.decimals));
-    if (this.canvasBar.value !== value) {
-      this.canvasBar.value = value;
+    this.newValue = Number((this.minValue + (this.maxValue - this.minValue) * ratio).toFixed(this.ctx.decimals));
+    if (this.canvasBar.value !== this.newValue) {
+      this.canvasBar.value = this.newValue;
     }
     this.updateColor(this.canvasBar.getValueColor());
-    this.onValue(value);
+    this.onValue(this.newValue);
   }
 
   private resize() {
@@ -321,18 +342,20 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
     const height = this.knobContainer.height();
     const size = Math.min(width, height);
     this.knob.css({width: size, height: size});
-    this.canvasBar.update({width: size, height: size} as GenericOptions);
+    if (this.canvasBar) {
+      this.canvasBar.update({width: size, height: size} as GenericOptions);
+    }
     this.setFontSize(this.knobTitle, this.title, this.knobTitleContainer.height(), this.knobTitleContainer.width());
     this.setFontSize(this.knobError, this.error, this.knobErrorContainer.height(), this.knobErrorContainer.width());
     const minmaxHeight = this.knobMinmaxContainer.height();
-    this.minmaxLabel.css({fontSize: minmaxHeight+'px', lineHeight: minmaxHeight+'px'});
+    this.minmaxLabel.css({fontSize: minmaxHeight + 'px', lineHeight: minmaxHeight + 'px'});
     this.checkValueSize();
   }
 
   private checkValueSize() {
-    const fontSize = this.knobValueContainer.height()/3.3;
+    const fontSize = this.knobValueContainer.height() / 3.3;
     const containerWidth = this.knobValueContainer.width();
-    this.setFontSize(this.knobValue, this.value+'', fontSize, containerWidth);
+    this.setFontSize(this.knobValue, this.value + '', fontSize, containerWidth);
   }
 
   private setFontSize(element: JQuery<HTMLElement>, text: string, fontSize: number, maxWidth: number) {
@@ -344,19 +367,19 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
       }
       textWidth = this.measureTextWidth(text, fontSize);
     }
-    element.css({fontSize: fontSize+'px', lineHeight: fontSize+'px'});
+    element.css({fontSize: fontSize + 'px', lineHeight: fontSize + 'px'});
   }
 
   private measureTextWidth(text: string, fontSize: number): number {
-    this.textMeasure.css({fontSize: fontSize+'px', lineHeight: fontSize+'px'});
+    this.textMeasure.css({fontSize: fontSize + 'px', lineHeight: fontSize + 'px'});
     this.textMeasure.html(text);
     return this.textMeasure.width();
   }
 
   private setValue(value: number) {
-    const ratio = (value-this.minValue) / (this.maxValue - this.minValue);
+    const ratio = (value - this.minValue) / (this.maxValue - this.minValue);
     this.rotation = this.lastDeg = this.currentDeg = this.ratioToDegree(ratio);
-    this.knobTopPointerContainer.css('transform','rotate('+(this.currentDeg)+'deg)');
+    this.knobTopPointerContainer.css('transform', 'rotate(' + (this.currentDeg) + 'deg)');
     if (this.canvasBar.value !== value) {
       this.canvasBar.value = value;
     }
@@ -379,7 +402,6 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
   private onValue(value: number) {
     this.value = this.formatValue(value);
     this.checkValueSize();
-    this.rpcUpdateValue(value);
     this.ctx.detectChanges();
   }
 
@@ -389,7 +411,8 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
 
   private rpcRequestValue() {
     this.error = '';
-    this.ctx.controlApi.sendTwoWayCommand(this.getValueMethod, null, this.requestTimeout).subscribe(
+    this.ctx.controlApi.sendTwoWayCommand(this.getValueMethod, null, this.requestTimeout,
+      this.requestPersistent, this.persistentPollingInterval).subscribe(
       (responseBody) => {
         if (isNumber(responseBody)) {
           const numValue = Number(Number(responseBody).toFixed(this.ctx.decimals));
@@ -416,7 +439,8 @@ export class KnobComponent extends PageComponent implements OnInit, OnDestroy {
       this.executingUpdateValue = true;
     }
     this.error = '';
-    this.ctx.controlApi.sendOneWayCommand(this.setValueMethod, value, this.requestTimeout).subscribe(
+    this.ctx.controlApi.sendOneWayCommand(this.setValueMethod, value, this.requestTimeout,
+      this.requestPersistent, this.persistentPollingInterval).subscribe(
       () => {
         this.executingUpdateValue = false;
         if (this.scheduledValue != null && this.scheduledValue !== this.rpcValue) {

@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 package org.thingsboard.server.common.msg.tools;
 
 import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket4j;
+import io.github.bucket4j.Bucket;
+import io.github.bucket4j.Refill;
 import io.github.bucket4j.local.LocalBucket;
 import io.github.bucket4j.local.LocalBucketBuilder;
+import lombok.Getter;
 
 import java.time.Duration;
 
@@ -28,13 +30,21 @@ import java.time.Duration;
 public class TbRateLimits {
     private final LocalBucket bucket;
 
+    @Getter
+    private final String configuration;
+
     public TbRateLimits(String limitsConfiguration) {
-        LocalBucketBuilder builder = Bucket4j.builder();
+        this(limitsConfiguration, false);
+    }
+
+    public TbRateLimits(String limitsConfiguration, boolean refillIntervally) {
+        LocalBucketBuilder builder = Bucket.builder();
         boolean initialized = false;
         for (String limitSrc : limitsConfiguration.split(",")) {
             long capacity = Long.parseLong(limitSrc.split(":")[0]);
             long duration = Long.parseLong(limitSrc.split(":")[1]);
-            builder.addLimit(Bandwidth.simple(capacity, Duration.ofSeconds(duration)));
+            Refill refill = refillIntervally ? Refill.intervally(capacity, Duration.ofSeconds(duration)) : Refill.greedy(capacity, Duration.ofSeconds(duration));
+            builder.addLimit(Bandwidth.classic(capacity, refill));
             initialized = true;
         }
         if (initialized) {
@@ -42,12 +52,15 @@ public class TbRateLimits {
         } else {
             throw new IllegalArgumentException("Failed to parse rate limits configuration: " + limitsConfiguration);
         }
-
-
+        this.configuration = limitsConfiguration;
     }
 
     public boolean tryConsume() {
         return bucket.tryConsume(1);
+    }
+
+    public boolean tryConsume(long number) {
+        return bucket.tryConsume(number);
     }
 
 }

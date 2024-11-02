@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,56 +15,20 @@
  */
 package org.thingsboard.server.service.ttl;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.thingsboard.server.dao.util.PsqlDao;
-
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLWarning;
-import java.sql.Statement;
+import org.thingsboard.server.common.data.id.TenantId;
+import org.thingsboard.server.common.msg.queue.ServiceType;
+import org.thingsboard.server.queue.discovery.PartitionService;
 
 
 @Slf4j
+@RequiredArgsConstructor
 public abstract class AbstractCleanUpService {
 
-    @Value("${spring.datasource.url}")
-    protected String dbUrl;
+    private final PartitionService partitionService;
 
-    @Value("${spring.datasource.username}")
-    protected String dbUserName;
-
-    @Value("${spring.datasource.password}")
-    protected String dbPassword;
-
-    protected long executeQuery(Connection conn, String query) {
-        long removed = 0L;
-        try {
-            Statement statement = conn.createStatement();
-            ResultSet resultSet = statement.executeQuery(query);
-            getWarnings(statement);
-            resultSet.next();
-            removed = resultSet.getLong(1);
-            log.debug("Successfully executed query: {}", query);
-        } catch (SQLException e) {
-            log.debug("Failed to execute query: {} due to: {}", query, e.getMessage());
-        }
-        return removed;
+    protected boolean isSystemTenantPartitionMine(){
+        return partitionService.resolve(ServiceType.TB_CORE, TenantId.SYS_TENANT_ID, TenantId.SYS_TENANT_ID).isMyPartition();
     }
-
-    protected void getWarnings(Statement statement) throws SQLException {
-        SQLWarning warnings = statement.getWarnings();
-        if (warnings != null) {
-            log.debug("{}", warnings.getMessage());
-            SQLWarning nextWarning = warnings.getNextWarning();
-            while (nextWarning != null) {
-                log.debug("{}", nextWarning.getMessage());
-                nextWarning = nextWarning.getNextWarning();
-            }
-        }
-    }
-
-    protected abstract void doCleanUp(Connection connection);
-
 }

@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2020 The Thingsboard Authors
+    Copyright © 2016-2024 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 <form (ngSubmit)="add()" style="min-width: 450px;">
   <mat-toolbar color="primary">
     <h2 translate>user.add</h2>
-    <span fxFlex></span>
-    <div [tb-help]="'user'"></div>
+    <span class="flex-1"></span>
+    <div [tb-help]="'users'"></div>
     <button mat-icon-button
             (click)="cancel()"
             type="button">
@@ -40,18 +40,18 @@
       </mat-select>
     </mat-form-field>
   </div>
-  <div mat-dialog-actions fxLayoutAlign="end center">
-    <button mat-raised-button color="primary"
-            type="submit"
-            [disabled]="(isLoading$ | async) || detailsForm.invalid || !detailsForm.dirty">
-      {{ 'action.add' | translate }}
-    </button>
+  <div mat-dialog-actions class="flex items-center justify-end">
     <button mat-button color="primary"
             type="button"
             cdkFocusInitial
             [disabled]="(isLoading$ | async)"
             (click)="cancel()">
       {{ 'action.cancel' | translate }}
+    </button>
+    <button mat-raised-button color="primary"
+            type="submit"
+            [disabled]="(isLoading$ | async) || detailsForm.invalid || !detailsForm.dirty">
+      {{ 'action.add' | translate }}
     </button>
   </div>
 </form>

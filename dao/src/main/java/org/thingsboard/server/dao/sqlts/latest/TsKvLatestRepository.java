@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2020 The Thingsboard Authors
+ * Copyright © 2016-2024 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,30 @@
  */
 package org.thingsboard.server.dao.sqlts.latest;
 
-import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.thingsboard.server.dao.model.sqlts.latest.TsKvLatestCompositeKey;
 import org.thingsboard.server.dao.model.sqlts.latest.TsKvLatestEntity;
 
-public interface TsKvLatestRepository extends CrudRepository<TsKvLatestEntity, TsKvLatestCompositeKey> {
+import java.util.List;
+import java.util.UUID;
+
+public interface TsKvLatestRepository extends JpaRepository<TsKvLatestEntity, TsKvLatestCompositeKey> {
+
+    @Query(value = "SELECT DISTINCT key_dictionary.key AS strKey FROM ts_kv_latest " +
+            "INNER JOIN key_dictionary ON ts_kv_latest.key = key_dictionary.key_id " +
+            "WHERE ts_kv_latest.entity_id IN (SELECT id FROM device WHERE device_profile_id = :device_profile_id AND tenant_id = :tenant_id limit 100) ORDER BY key_dictionary.key", nativeQuery = true)
+    List<String> getKeysByDeviceProfileId(@Param("tenant_id") UUID tenantId, @Param("device_profile_id") UUID deviceProfileId);
+
+    @Query(value = "SELECT DISTINCT key_dictionary.key AS strKey FROM ts_kv_latest " +
+            "INNER JOIN key_dictionary ON ts_kv_latest.key = key_dictionary.key_id " +
+            "WHERE ts_kv_latest.entity_id IN (SELECT id FROM device WHERE tenant_id = :tenant_id limit 100) ORDER BY key_dictionary.key", nativeQuery = true)
+    List<String> getKeysByTenantId(@Param("tenant_id") UUID tenantId);
+
+    @Query(value = "SELECT DISTINCT key_dictionary.key AS strKey FROM ts_kv_latest " +
+            "INNER JOIN key_dictionary ON ts_kv_latest.key = key_dictionary.key_id " +
+            "WHERE ts_kv_latest.entity_id IN :entityIds ORDER BY key_dictionary.key", nativeQuery = true)
+    List<String> findAllKeysByEntityIds(@Param("entityIds") List<UUID> entityIds);
 
 }

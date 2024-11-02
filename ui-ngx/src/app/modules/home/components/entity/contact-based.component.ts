@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2020 The Thingsboard Authors
+/// Copyright © 2016-2024 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -16,34 +16,37 @@
 
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
-import { FormBuilder, FormGroup, ValidatorFn, Validators } from '@angular/forms';
+import { UntypedFormBuilder, UntypedFormGroup, ValidatorFn, Validators } from '@angular/forms';
 import { ContactBased } from '@shared/models/contact-based.model';
-import { AfterViewInit } from '@angular/core';
-import { POSTAL_CODE_PATTERNS } from '@home/models/contact.models';
+import { AfterViewInit, ChangeDetectorRef, Directive } from '@angular/core';
 import { HasId } from '@shared/models/base-data';
 import { EntityComponent } from './entity.component';
 import { EntityTableConfig } from '@home/models/entity/entities-table-config.models';
+import { CountryData } from '@shared/models/country.models';
 
+@Directive()
 export abstract class ContactBasedComponent<T extends ContactBased<HasId>> extends EntityComponent<T> implements AfterViewInit {
 
   protected constructor(protected store: Store<AppState>,
-                        protected fb: FormBuilder,
+                        protected fb: UntypedFormBuilder,
                         protected entityValue: T,
-                        protected entitiesTableConfigValue: EntityTableConfig<T>) {
-    super(store, fb, entityValue, entitiesTableConfigValue);
+                        protected entitiesTableConfigValue: EntityTableConfig<T>,
+                        protected cd: ChangeDetectorRef,
+                        protected countryData: CountryData) {
+    super(store, fb, entityValue, entitiesTableConfigValue, cd);
   }
 
-  buildForm(entity: T): FormGroup {
+  buildForm(entity: T): UntypedFormGroup {
     const entityForm = this.buildEntityForm(entity);
-    entityForm.addControl('country', this.fb.control(entity ? entity.country : '', []));
-    entityForm.addControl('city', this.fb.control(entity ? entity.city : '', []));
-    entityForm.addControl('state', this.fb.control(entity ? entity.state : '', []));
+    entityForm.addControl('country', this.fb.control(entity ? entity.country : '', [Validators.maxLength(255)]));
+    entityForm.addControl('city', this.fb.control(entity ? entity.city : '', [Validators.maxLength(255)]));
+    entityForm.addControl('state', this.fb.control(entity ? entity.state : '', [Validators.maxLength(255)]));
     entityForm.addControl('zip', this.fb.control(entity ? entity.zip : '',
       this.zipValidators(entity ? entity.country : '')
     ));
     entityForm.addControl('address', this.fb.control(entity ? entity.address : '', []));
     entityForm.addControl('address2', this.fb.control(entity ? entity.address2 : '', []));
-    entityForm.addControl('phone', this.fb.control(entity ? entity.phone : '', []));
+    entityForm.addControl('phone', this.fb.control(entity ? entity.phone : '', [Validators.maxLength(255)]));
     entityForm.addControl('email', this.fb.control(entity ? entity.email : '', [Validators.email]));
     return entityForm;
   }
@@ -73,14 +76,16 @@ export abstract class ContactBasedComponent<T extends ContactBased<HasId>> exten
 
   zipValidators(country: string): ValidatorFn[] {
     const zipValidators = [];
-    if (country && POSTAL_CODE_PATTERNS[country]) {
-      const postalCodePattern = POSTAL_CODE_PATTERNS[country];
-      zipValidators.push(Validators.pattern(postalCodePattern));
+    if (country) {
+      const postCodePattern = this.countryData.allCountries.find(item => item.name === country)?.postCodePattern;
+      if (postCodePattern) {
+        zipValidators.push(Validators.pattern(postCodePattern));
+      }
     }
     return zipValidators;
   }
 
-  abstract buildEntityForm(entity: T): FormGroup;
+  abstract buildEntityForm(entity: T): UntypedFormGroup;
 
   abstract updateEntityForm(entity: T);
 
