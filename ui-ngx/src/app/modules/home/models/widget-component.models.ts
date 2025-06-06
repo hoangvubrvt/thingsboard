@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ import {
   DatasourceData,
   FormattedData,
   fullWidgetTypeFqn,
-  JsonSettingsSchema,
   Widget,
   WidgetActionDescriptor,
   WidgetActionSource,
   WidgetConfig,
   WidgetControllerDescriptor,
+  WidgetHeaderActionButtonType,
   WidgetType,
   widgetType,
   WidgetTypeDescriptor,
@@ -47,7 +47,16 @@ import {
   WidgetActionsApi,
   WidgetSubscriptionApi
 } from '@core/api/widget-api.models';
-import { ChangeDetectorRef, InjectionToken, Injector, NgZone, TemplateRef, Type } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  InjectionToken,
+  Injector,
+  NgZone,
+  Renderer2,
+  TemplateRef,
+  Type,
+  ViewContainerRef
+} from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RafService } from '@core/services/raf.service';
 import { WidgetTypeId } from '@shared/models/id/widget-type-id';
@@ -103,8 +112,12 @@ import { MillisecondsToTimeStringPipe } from '@shared/pipe/milliseconds-to-time-
 import { SharedTelemetrySubscriber, TelemetrySubscriber } from '@shared/models/telemetry/telemetry.models';
 import { UserId } from '@shared/models/id/user-id';
 import { UserSettingsService } from '@core/http/user-settings.service';
-import { DataKeySettingsFunction } from '@home/components/widget/config/data-keys.component.models';
+import { DataKeySettingsFunction } from '@home/components/widget/lib/settings/common/key/data-keys.component.models';
 import { UtilsService } from '@core/services/utils.service';
+import { CompiledTbFunction } from '@shared/models/js-function.models';
+import { FormProperty } from '@shared/models/dynamic-form.models';
+import { ExportableEntity } from '@shared/models/base-data';
+import { TbUnit } from '@shared/models/unit.models';
 
 export interface IWidgetAction {
   name: string;
@@ -117,8 +130,14 @@ export type ShowWidgetHeaderActionFunction = (ctx: WidgetContext, data: Formatte
 export interface WidgetHeaderAction extends IWidgetAction {
   displayName: string;
   descriptor: WidgetActionDescriptor;
+  buttonType?: WidgetHeaderActionButtonType;
+  showIcon?:boolean;
+  buttonColor?: string;
+  buttonFillColor?: string;
+  buttonBorderColor?: string;
+  customButtonStyle?: {[key: string]: string};
   useShowWidgetHeaderActionFunction: boolean;
-  showWidgetHeaderActionFunction: ShowWidgetHeaderActionFunction;
+  showWidgetHeaderActionFunction: CompiledTbFunction<ShowWidgetHeaderActionFunction>;
 }
 
 export interface WidgetAction extends IWidgetAction {
@@ -157,7 +176,7 @@ export class WidgetContext {
     return this.widget.config.settings;
   }
 
-  get units(): string {
+  get units(): TbUnit {
     return this.widget.config.units || '';
   }
 
@@ -214,6 +233,8 @@ export class WidgetContext {
   http: HttpClient;
   sanitizer: DomSanitizer;
   router: Router;
+  renderer: Renderer2;
+  widgetContentContainer: ViewContainerRef;
 
   private changeDetectorValue: ChangeDetectorRef;
   private containerChangeDetectorValue: ChangeDetectorRef;
@@ -294,6 +315,7 @@ export class WidgetContext {
   timeWindow?: WidgetTimewindow;
 
   embedTitlePanel?: boolean;
+  embedActionsPanel?: boolean;
   overflowVisible?: boolean;
 
   hideTitlePanel = false;
@@ -554,14 +576,14 @@ export interface IDynamicWidgetComponent {
   [key: string]: any;
 }
 
-export interface WidgetInfo extends WidgetTypeDescriptor, WidgetControllerDescriptor {
+export interface WidgetInfo extends WidgetTypeDescriptor, WidgetControllerDescriptor, ExportableEntity<WidgetTypeId> {
   widgetName: string;
   fullFqn: string;
   deprecated: boolean;
   scada: boolean;
-  typeSettingsSchema?: string | any;
-  typeDataKeySettingsSchema?: string | any;
-  typeLatestDataKeySettingsSchema?: string | any;
+  typeSettingsForm?: FormProperty[];
+  typeDataKeySettingsForm?: FormProperty[];
+  typeLatestDataKeySettingsForm?: FormProperty[];
   image?: string;
   description?: string;
   tags?: string[];
@@ -576,9 +598,9 @@ export interface WidgetConfigComponentData {
   typeParameters: WidgetTypeParameters;
   actionSources: {[actionSourceId: string]: WidgetActionSource};
   isDataEnabled: boolean;
-  settingsSchema: JsonSettingsSchema;
-  dataKeySettingsSchema: JsonSettingsSchema;
-  latestDataKeySettingsSchema: JsonSettingsSchema;
+  settingsForm: FormProperty[];
+  dataKeySettingsForm: FormProperty[];
+  latestDataKeySettingsForm: FormProperty[];
   dataKeySettingsFunction: DataKeySettingsFunction;
   settingsDirective: string;
   dataKeySettingsDirective: string;
@@ -601,8 +623,8 @@ export const MissingWidgetType: WidgetInfo = {
     '</div>',
   templateCss: '',
   controllerScript: 'self.onInit = function() {}',
-  settingsSchema: '{}\n',
-  dataKeySettingsSchema: '{}\n',
+  settingsForm: [],
+  dataKeySettingsForm: [],
   image: null,
   description: null,
   defaultConfig: '{\n' +
@@ -628,8 +650,8 @@ export const ErrorWidgetType: WidgetInfo = {
                 '</div>',
   templateCss: '',
   controllerScript: 'self.onInit = function() {}',
-  settingsSchema: '{}\n',
-  dataKeySettingsSchema: '{}\n',
+  settingsForm: [],
+  dataKeySettingsForm: [],
   image: null,
   description: null,
   defaultConfig: '{\n' +
@@ -641,9 +663,9 @@ export const ErrorWidgetType: WidgetInfo = {
 };
 
 export interface WidgetTypeInstance {
-  getSettingsSchema?: () => string;
-  getDataKeySettingsSchema?: () => string;
-  getLatestDataKeySettingsSchema?: () => string;
+  getSettingsForm?: () => FormProperty[];
+  getDataKeySettingsForm?: () => FormProperty[];
+  getLatestDataKeySettingsForm?: () => FormProperty[];
   typeParameters?: () => WidgetTypeParameters;
   useCustomDatasources?: () => boolean;
   actionSources?: () => {[actionSourceId: string]: WidgetActionSource};
@@ -662,6 +684,7 @@ export const toWidgetInfo = (widgetTypeEntity: WidgetType): WidgetInfo => ({
   fullFqn: fullWidgetTypeFqn(widgetTypeEntity),
   deprecated: widgetTypeEntity.deprecated,
   scada: widgetTypeEntity.scada,
+  externalId: widgetTypeEntity.externalId,
   type: widgetTypeEntity.descriptor.type,
   sizeX: widgetTypeEntity.descriptor.sizeX,
   sizeY: widgetTypeEntity.descriptor.sizeY,
@@ -669,9 +692,9 @@ export const toWidgetInfo = (widgetTypeEntity: WidgetType): WidgetInfo => ({
   templateHtml: widgetTypeEntity.descriptor.templateHtml,
   templateCss: widgetTypeEntity.descriptor.templateCss,
   controllerScript: widgetTypeEntity.descriptor.controllerScript,
-  settingsSchema: widgetTypeEntity.descriptor.settingsSchema,
-  dataKeySettingsSchema: widgetTypeEntity.descriptor.dataKeySettingsSchema,
-  latestDataKeySettingsSchema: widgetTypeEntity.descriptor.latestDataKeySettingsSchema,
+  settingsForm: widgetTypeEntity.descriptor.settingsForm,
+  dataKeySettingsForm: widgetTypeEntity.descriptor.dataKeySettingsForm,
+  latestDataKeySettingsForm: widgetTypeEntity.descriptor.latestDataKeySettingsForm,
   settingsDirective: widgetTypeEntity.descriptor.settingsDirective,
   dataKeySettingsDirective: widgetTypeEntity.descriptor.dataKeySettingsDirective,
   latestDataKeySettingsDirective: widgetTypeEntity.descriptor.latestDataKeySettingsDirective,
@@ -698,9 +721,9 @@ export const toWidgetType = (widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId:
     templateHtml: widgetInfo.templateHtml,
     templateCss: widgetInfo.templateCss,
     controllerScript: widgetInfo.controllerScript,
-    settingsSchema: widgetInfo.settingsSchema,
-    dataKeySettingsSchema: widgetInfo.dataKeySettingsSchema,
-    latestDataKeySettingsSchema: widgetInfo.latestDataKeySettingsSchema,
+    settingsForm: widgetInfo.settingsForm,
+    dataKeySettingsForm: widgetInfo.dataKeySettingsForm,
+    latestDataKeySettingsForm: widgetInfo.latestDataKeySettingsForm,
     settingsDirective: widgetInfo.settingsDirective,
     dataKeySettingsDirective: widgetInfo.dataKeySettingsDirective,
     latestDataKeySettingsDirective: widgetInfo.latestDataKeySettingsDirective,
@@ -717,6 +740,7 @@ export const toWidgetType = (widgetInfo: WidgetInfo, id: WidgetTypeId, tenantId:
     name: widgetInfo.widgetName,
     deprecated: widgetInfo.deprecated,
     scada: widgetInfo.scada,
+    externalId: widgetInfo.externalId,
     descriptor
   };
 };

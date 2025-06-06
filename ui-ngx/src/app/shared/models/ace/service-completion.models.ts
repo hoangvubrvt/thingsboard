@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -101,6 +101,10 @@ export const importEntitiesResultInfoHref = '<a href="https://github.com/thingsb
 export const customDialogComponentHref = '<a href="https://github.com/thingsboard/thingsboard/blob/master/ui-ngx/src/app/modules/home/components/widget/dialog/custom-dialog.component.ts#L48" target="_blank">CustomDialogComponent</a>';
 
 export const resourceInfoHref = '<a href="https://github.com/thingsboard/thingsboard/blob/b033b51712244d08e0f5e0beb8be60c9f8fa4cd2/ui-ngx/src/app/shared/models/resource.models.ts#L51" target="_blank">Resource info</a>';
+
+export const bulkImportResultHref = '<a href="https://github.com/thingsboard/thingsboard/blob/1abaa6f1188e5adc80912e7475ccb6347a822c8d/ui-ngx/src/app/shared/import-export/import-export.models.ts#L135" target="_blank">Bulk import result</a>';
+
+export const bulkImportRequestHref = '<a href="https://github.com/thingsboard/thingsboard/blob/1abaa6f1188e5adc80912e7475ccb6347a822c8d/ui-ngx/src/app/shared/import-export/import-export.models.ts#L125" target="_blank">Bulk import request</a>';
 
 export const pageLinkArg: FunctionArg = {
   name: 'pageLink',
@@ -386,6 +390,67 @@ export const serviceCompletions: TbEditorCompletions = {
           requestConfigArg
         ],
         return: observablePageDataReturnType(assetInfoHref)
+      },
+      getTenantAssetInfosByAssetProfileId: {
+        description: 'Get tenant asset infos by asset profile ID',
+        meta: 'function',
+        args: [
+          pageLinkArg,
+          { name: 'assetProfileId', type: 'string', optional: true, description: 'ID of the asset profile' },
+          requestConfigArg
+        ],
+        return: observablePageDataReturnType(assetInfoHref)
+      },
+      getCustomerAssetInfosByAssetProfileId: {
+        description: 'Get customer asset infos by asset profile ID',
+        meta: 'function',
+        args: [
+          { name: 'customerId', type: 'string', description: 'ID of the customer' },
+          pageLinkArg,
+          { name: 'assetProfileId', type: 'string', optional: true, description: 'ID of the asset profile' },
+          requestConfigArg
+        ],
+        return: observablePageDataReturnType(assetInfoHref)
+      },
+      assignAssetToEdge: {
+        description: 'Assign an asset to an edge',
+        meta: 'function',
+        args: [
+          { name: 'edgeId', type: 'string', description: 'ID of the edge' },
+          { name: 'assetId', type: 'string', description: 'ID of the asset' },
+          requestConfigArg
+        ],
+        return: observableReturnType(assetHref)
+      },
+      unassignAssetFromEdge: {
+        description: 'Unassign an asset from an edge',
+        meta: 'function',
+        args: [
+          { name: 'edgeId', type: 'string', description: 'ID of the edge' },
+          { name: 'assetId', type: 'string', description: 'ID of the asset' },
+          requestConfigArg
+        ],
+        return: observableVoid()
+      },
+      getEdgeAssets: {
+        description: 'Get assets assigned to an edge',
+        meta: 'function',
+        args: [
+          { name: 'edgeId', type: 'string', description: 'ID of the edge' },
+          pageLinkArg,
+          { name: 'type', type: 'string', optional: true, description: 'Asset type' },
+          requestConfigArg
+        ],
+        return: observablePageDataReturnType(assetInfoHref)
+      },
+      bulkImportAssets: {
+        description: 'Bulk import assets with provided entities data',
+        meta: 'function',
+        args: [
+          { name: 'entitiesData', type: bulkImportRequestHref, description: 'Data for bulk importing assets' },
+          requestConfigArg
+        ],
+        return: observableReturnType(bulkImportResultHref)
       },
       getAsset: {
         description: 'Get asset by id',

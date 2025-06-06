@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@ package org.thingsboard.server.service.install;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,7 +47,7 @@ import org.thingsboard.server.dao.rule.RuleChainService;
 import org.thingsboard.server.dao.util.ImageUtils;
 import org.thingsboard.server.dao.widget.WidgetTypeService;
 import org.thingsboard.server.dao.widget.WidgetsBundleService;
-import org.thingsboard.server.service.install.update.ImagesUpdater;
+import org.thingsboard.server.service.install.update.ResourcesUpdater;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -119,9 +117,7 @@ public class InstallScripts {
     private ResourceService resourceService;
 
     @Autowired
-    private ImagesUpdater imagesUpdater;
-    @Getter @Setter
-    private boolean updateImages = false;
+    private ResourcesUpdater resourcesUpdater;
 
     @Autowired
     private ImageService imageService;
@@ -202,7 +198,7 @@ public class InstallScripts {
         ruleChain = ruleChainService.saveRuleChain(ruleChain, false);
 
         ruleChainMetaData.setRuleChainId(ruleChain.getId());
-        ruleChainService.saveRuleChainMetaData(TenantId.SYS_TENANT_ID, ruleChainMetaData, Function.identity(), false);
+        ruleChainService.saveRuleChainMetaData(tenantId, ruleChainMetaData, Function.identity(), false);
 
         return ruleChain;
     }
@@ -247,10 +243,8 @@ public class InstallScripts {
                 dirStream.forEach(
                         path -> {
                             try {
-                                String widgetTypeJson = Files.readString(path);
-                                widgetTypeJson = resourceService.checkSystemResourcesUsage(widgetTypeJson, ResourceType.JS_MODULE);
-
-                                WidgetTypeDetails widgetTypeDetails = JacksonUtil.fromString(widgetTypeJson, WidgetTypeDetails.class);
+                                JsonNode widgetTypeJson = JacksonUtil.toJsonNode(path.toFile());
+                                WidgetTypeDetails widgetTypeDetails = JacksonUtil.treeToValue(widgetTypeJson, WidgetTypeDetails.class);
                                 widgetTypeService.saveWidgetType(widgetTypeDetails);
                             } catch (Exception e) {
                                 log.error("Unable to load widget type from json: [{}]", path.toString());
@@ -394,28 +388,25 @@ public class InstallScripts {
         }
     }
 
-    public void updateImages() {
-        imagesUpdater.updateWidgetsBundlesImages();
-        imagesUpdater.updateWidgetTypesImages();
-        imagesUpdater.updateDashboardsImages();
-        imagesUpdater.updateDeviceProfilesImages();
-        imagesUpdater.updateAssetProfilesImages();
-    }
-
-    public void loadSystemImages() {
-        log.info("Loading system images...");
+    public void loadSystemImagesAndResources() {
+        log.info("Loading system images and resources...");
         Stream<Path> dashboardsFiles = Stream.concat(listDir(Paths.get(getDataDir(), JSON_DIR, DEMO_DIR, DASHBOARDS_DIR)),
                 listDir(Paths.get(getDataDir(), JSON_DIR, TENANT_DIR, DASHBOARDS_DIR)));
         try (dashboardsFiles) {
             dashboardsFiles.forEach(file -> {
                 try {
                     Dashboard dashboard = JacksonUtil.OBJECT_MAPPER.readValue(file.toFile(), Dashboard.class);
-                    imagesUpdater.createSystemImages(dashboard);
+                    resourcesUpdater.createSystemImagesAndResources(dashboard);
                 } catch (Exception e) {
                     log.error("Failed to create system images for default dashboard {}", file.getFileName(), e);
                 }
             });
         }
+
+        Path resourcesDir = Path.of(getDataDir(), RESOURCES_DIR);
+        loadSystemResources(resourcesDir.resolve("images"), ResourceType.IMAGE, null);
+        loadSystemResources(resourcesDir.resolve("js_modules"), ResourceType.JS_MODULE, ResourceSubType.EXTENSION);
+        loadSystemResources(resourcesDir.resolve("dashboards"), ResourceType.DASHBOARD, null);
     }
 
     public void loadDashboards(TenantId tenantId, CustomerId customerId) {
@@ -506,28 +497,25 @@ public class InstallScripts {
         }
     }
 
-    public void loadSystemResources() {
-        Path resourcesDir = Path.of(getDataDir(), RESOURCES_DIR);
-        loadSystemResources(resourcesDir.resolve("js_modules"), ResourceType.JS_MODULE);
-        loadSystemResources(resourcesDir.resolve("dashboards"), ResourceType.DASHBOARD);
-    }
-
-    private void loadSystemResources(Path dir, ResourceType resourceType) {
+    private void loadSystemResources(Path dir, ResourceType resourceType, ResourceSubType resourceSubType) {
         listDir(dir).forEach(resourceFile -> {
             String resourceKey = resourceFile.getFileName().toString();
             try {
-                String data = getContent(resourceFile);
-                TbResource resource = resourceService.createOrUpdateSystemResource(resourceType, resourceKey, data);
-                log.info("{} resource {}", (resource.getId() == null ? "Created" : "Updated"), resourceKey);
+                byte[] data = getContent(resourceFile);
+                if (resourceType == ResourceType.IMAGE) {
+                    imageService.createOrUpdateSystemImage(resourceKey, data);
+                } else {
+                    resourceService.createOrUpdateSystemResource(resourceType, resourceSubType, resourceKey, data);
+                }
             } catch (Exception e) {
                 throw new RuntimeException("Unable to load system resource " + resourceFile, e);
             }
         });
     }
 
-    private String getContent(Path file) {
+    private byte[] getContent(Path file) {
         try {
-            return Files.readString(file);
+            return Files.readAllBytes(file);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

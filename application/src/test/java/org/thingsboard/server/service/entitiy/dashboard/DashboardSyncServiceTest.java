@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,17 +57,15 @@ public class DashboardSyncServiceTest extends AbstractControllerTest {
     @Test
     public void testGatewaysDashboardSync() throws Exception {
         loginTenantAdmin();
-        await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> {
+        await().atMost(45, TimeUnit.SECONDS).untilAsserted(() -> {
             MockHttpServletResponse response = doGet("/api/resource/dashboard/system/gateways_dashboard.json")
                     .andExpect(status().isOk())
                     .andReturn().getResponse();
             String dashboardJson = response.getContentAsString();
-            String etag = response.getHeader("ETag");
-
             Dashboard dashboard = JacksonUtil.fromString(dashboardJson, Dashboard.class);
             assertThat(dashboard).isNotNull();
             assertThat(dashboard.getTitle()).containsIgnoringCase("gateway");
-            assertThat(etag).isNotBlank();
+            assertThat(response.getHeader("ETag")).isNotBlank();
         });
     }
 

@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -14,17 +14,7 @@
 /// limitations under the License.
 ///
 
-import {
-  AfterViewInit,
-  Component,
-  ElementRef,
-  forwardRef,
-  Input,
-  OnChanges,
-  OnInit,
-  SimpleChanges,
-  ViewChild
-} from '@angular/core';
+import { Component, ElementRef, forwardRef, Input, OnChanges, OnInit, SimpleChanges, ViewChild } from '@angular/core';
 import {
   ControlValueAccessor,
   NG_VALIDATORS,
@@ -44,7 +34,7 @@ import { EntityService } from '@core/http/entity.service';
 import { MatAutocomplete } from '@angular/material/autocomplete';
 import { MatChipGrid } from '@angular/material/chips';
 import { coerceBooleanProperty } from '@angular/cdk/coercion';
-import { SubscriptSizing } from '@angular/material/form-field';
+import { MatFormFieldAppearance, SubscriptSizing } from '@angular/material/form-field';
 import { coerceBoolean } from '@shared/decorators/coercion';
 import { isArray } from 'lodash';
 
@@ -65,7 +55,7 @@ import { isArray } from 'lodash';
     }
   ]
 })
-export class EntityListComponent implements ControlValueAccessor, OnInit, AfterViewInit, OnChanges {
+export class EntityListComponent implements ControlValueAccessor, OnInit, OnChanges {
 
   entityListFormGroup: UntypedFormGroup;
 
@@ -85,6 +75,9 @@ export class EntityListComponent implements ControlValueAccessor, OnInit, AfterV
 
   @Input()
   requiredText = this.translate.instant('entity.entity-list-empty');
+
+  @Input()
+  appearance: MatFormFieldAppearance = 'fill';
 
   private requiredValue: boolean;
   get required(): boolean {
@@ -112,6 +105,10 @@ export class EntityListComponent implements ControlValueAccessor, OnInit, AfterV
   @coerceBoolean()
   syncIdsWithDB = false;
 
+  @Input()
+  @coerceBoolean()
+  inlineField: boolean;
+
   @ViewChild('entityInput') entityInput: ElementRef<HTMLInputElement>;
   @ViewChild('entityAutocomplete') matAutocomplete: MatAutocomplete;
   @ViewChild('chipList', {static: true}) chipList: MatChipGrid;
@@ -123,9 +120,9 @@ export class EntityListComponent implements ControlValueAccessor, OnInit, AfterV
 
   private dirty = false;
 
-  private propagateChange = (v: any) => { };
+  private propagateChange = (_v: any) => { };
 
-  constructor(public translate: TranslateService,
+  constructor(private translate: TranslateService,
               private entityService: EntityService,
               private fb: UntypedFormBuilder) {
     this.entityListFormGroup = this.fb.group({
@@ -143,7 +140,7 @@ export class EntityListComponent implements ControlValueAccessor, OnInit, AfterV
     this.propagateChange = fn;
   }
 
-  registerOnTouched(fn: any): void {
+  registerOnTouched(_fn: any): void {
   }
 
   ngOnInit() {
@@ -173,9 +170,6 @@ export class EntityListComponent implements ControlValueAccessor, OnInit, AfterV
         }
       }
     }
-  }
-
-  ngAfterViewInit(): void {
   }
 
   setDisabledState(isDisabled: boolean): void {

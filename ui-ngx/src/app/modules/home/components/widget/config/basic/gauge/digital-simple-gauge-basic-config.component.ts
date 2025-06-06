@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import {
   DigitalGaugeType
 } from '@home/components/widget/lib/digital-gauge.models';
 import { ColorSettings, ColorType } from '@shared/models/widget-settings.models';
+import { getSourceTbUnitSymbol } from '@shared/models/unit.models';
 
 @Component({
   selector: 'tb-digital-simple-gauge-basic-config',
@@ -266,6 +267,6 @@ export class DigitalSimpleGaugeBasicConfigComponent extends BasicWidgetConfigCom
   }
 
   private _valuePreviewFn(units: boolean): string {
-    return formatValue(22, 0, units ? this.simpleGaugeWidgetConfigForm.get('units').value : null, true);
+    return formatValue(22, 0, units ? getSourceTbUnitSymbol(this.simpleGaugeWidgetConfigForm.get('units').value) : null, true);
   }
 }

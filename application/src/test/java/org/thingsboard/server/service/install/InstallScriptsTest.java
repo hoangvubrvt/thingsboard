@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import org.thingsboard.server.dao.tenant.TenantService;
 import org.thingsboard.server.dao.usagerecord.ApiLimitService;
 import org.thingsboard.server.dao.widget.WidgetTypeService;
 import org.thingsboard.server.dao.widget.WidgetsBundleService;
-import org.thingsboard.server.service.install.update.ImagesUpdater;
+import org.thingsboard.server.service.install.update.ResourcesUpdater;
 
 import java.nio.file.Path;
 import java.util.Collections;
@@ -67,7 +67,7 @@ class InstallScriptsTest {
     @MockBean
     ImageService imageService;
     @MockBean
-    ImagesUpdater imagesUpdater;
+    ResourcesUpdater resourcesUpdater;
     @SpyBean
     InstallScripts installScripts;
 

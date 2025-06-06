@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2024 The Thingsboard Authors
+    Copyright © 2016-2025 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -25,6 +25,9 @@
           {{ interval.name | translate:interval.translateParams }}
         </mat-option>
       </mat-select>
+      <ng-container matSuffix>
+        <ng-content select="[matSuffix]"></ng-content>
+      </ng-container>
     </mat-form-field>
   </section>
   <section class="tb-form-row column-xs no-border no-padding tb-standard-fields advanced-input"

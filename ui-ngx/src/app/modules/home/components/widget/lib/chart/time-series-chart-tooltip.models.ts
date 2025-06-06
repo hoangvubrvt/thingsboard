@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ export interface TimeSeriesChartTooltipWidgetSettings {
   tooltipValueFormatter?: string | TimeSeriesChartTooltipValueFormatFunction;
   tooltipShowDate: boolean;
   tooltipDateInterval?: boolean;
+  tooltipHideZeroFalse?: boolean;
   tooltipDateFormat: DateFormatSettings;
   tooltipDateFont: Font;
   tooltipDateColor: string;
@@ -129,7 +130,9 @@ export class TimeSeriesChartTooltip {
         this.renderer.appendChild(tooltipItemsElement, this.constructTooltipDateElement(items[0].param, interval));
       }
       for (const item of items) {
-        this.renderer.appendChild(tooltipItemsElement, this.constructTooltipSeriesElement(item));
+        if (!this.settings.tooltipHideZeroFalse || item.param.value[1]) {
+          this.renderer.appendChild(tooltipItemsElement, this.constructTooltipSeriesElement(item));
+        }
       }
     }
   }

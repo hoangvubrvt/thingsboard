@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -20,13 +20,13 @@ import { SharedModule } from '@shared/shared.module';
 import { ImportExportService } from '@shared/import-export/import-export.service';
 import { CommonModule } from '@angular/common';
 import { entityTypeTranslations } from '@shared/models/entity-type.models';
-import { EntityInfoData } from '@shared/models/entity.models';
+import { EntityInfoData, VersionedEntity } from '@shared/models/entity.models';
 import { EntityId } from '@shared/models/id/entity-id';
 import { RuleChainMetaData } from '@shared/models/rule-chain.models';
 
 interface EntityConflictDialogData {
   message: string;
-  entity: EntityInfoData | RuleChainMetaData;
+  entity: VersionedEntity;
 }
 
 @Component({

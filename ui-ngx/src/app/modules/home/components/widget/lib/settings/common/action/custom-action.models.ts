@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ import { deepClone, isDefined, isUndefined } from '@core/utils';
 import customSampleJs from './custom-sample-js.raw';
 import customSampleCss from './custom-sample-css.raw';
 import customSampleHtml from './custom-sample-html.raw';
+import placeMapItemSampleHtml from './place-map-item-sample-html.raw';
+import placeMapItemSampleJs from './place-map-item-sample-js.raw';
 
 const customActionCompletions: TbEditorCompletions = {
   ...{
@@ -63,8 +65,7 @@ const customActionCompletions: TbEditorCompletions = {
       type: 'string',
       description: 'Label of the entity for which the action was triggered.'
     }
-  },
-  ...serviceCompletions
+  }
 };
 
 const customPrettyActionCompletions: TbEditorCompletions = {
@@ -94,6 +95,16 @@ export const toCustomAction = (action: WidgetAction): CustomActionDescriptor => 
     };
   }
   result.customResources = action && isDefined(action.customResources) ? deepClone(action.customResources) : [];
+  return result;
+};
+
+export const toPlaceMapItemAction = (action: WidgetAction): CustomActionDescriptor => {
+  const result: CustomActionDescriptor = {
+    customHtml: action?.customHtml ?? placeMapItemSampleHtml,
+    customCss: action?.customCss ?? '',
+    customFunction: action?.customFunction ?? placeMapItemSampleJs
+  };
+  result.customResources = isDefined(action?.customResources) ? deepClone(action.customResources) : [];
   return result;
 };
 

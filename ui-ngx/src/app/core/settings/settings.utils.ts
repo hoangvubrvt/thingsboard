@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import { TranslateService } from '@ngx-translate/core';
 import _moment from 'moment';
 import { Observable } from 'rxjs';
 
-export function updateUserLang(translate: TranslateService, userLang: string, translations = env.supportedLangs): Observable<any> {
+export function updateUserLang(translate: TranslateService, document: Document, userLang: string, translations = env.supportedLangs): Observable<any> {
   let targetLang = userLang;
   if (!translations) {
     translations = env.supportedLangs;
@@ -37,6 +37,7 @@ export function updateUserLang(translate: TranslateService, userLang: string, tr
   if (!env.production) {
     console.log(`Detected supported lang: ${detectedSupportedLang}`);
   }
+  document.documentElement.lang = detectedSupportedLang.replace('_', '-');
   _moment.locale([detectedSupportedLang]);
   return translate.use(detectedSupportedLang);
 }

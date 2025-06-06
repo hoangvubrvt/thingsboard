@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ import org.thingsboard.server.common.data.notification.rule.trigger.config.NewPl
 import org.thingsboard.server.common.data.notification.rule.trigger.config.NotificationRuleTriggerConfig;
 import org.thingsboard.server.common.data.notification.rule.trigger.config.NotificationRuleTriggerType;
 import org.thingsboard.server.common.data.notification.rule.trigger.config.RateLimitsNotificationRuleTriggerConfig;
+import org.thingsboard.server.common.data.notification.rule.trigger.config.ResourcesShortageNotificationRuleTriggerConfig;
 import org.thingsboard.server.common.data.notification.rule.trigger.config.RuleEngineComponentLifecycleEventNotificationRuleTriggerConfig;
 import org.thingsboard.server.common.data.notification.rule.trigger.config.TaskProcessingFailureNotificationRuleTriggerConfig;
 import org.thingsboard.server.common.data.notification.template.NotificationTemplate;
@@ -372,12 +373,18 @@ public class DefaultNotifications {
                     .build())
             .build();
 
-    public static final DefaultNotification queueTypeDeprecation = DefaultNotification.builder()
-            .name("Queue type deprecation")
-            .type(NotificationType.GENERAL)
-            .subject("WARNING: ${queueType} deprecation")
-            .text("${queueType} queue type is deprecated and will be removed in ThingsBoard 4.0. Please migrate to Apache Kafka")
-            .icon("warning").color(RED_COLOR)
+    public static final DefaultNotification resourcesShortage = DefaultNotification.builder()
+            .name("Resources shortage notification")
+            .type(NotificationType.RESOURCES_SHORTAGE)
+            .subject("Warning: ${resource} shortage")
+            .text("${resource} usage is at ${usage}%.")
+            .icon("warning")
+            .rule(DefaultRule.builder()
+                    .name("Resources shortage")
+                    .triggerConfig(ResourcesShortageNotificationRuleTriggerConfig.builder().cpuThreshold(0.8f).storageThreshold(0.8f).ramThreshold(0.8f).build())
+                    .description("Send notification to system admins on resource shortage")
+                    .build())
+            .color(RED_COLOR)
             .build();
 
     private final NotificationTemplateService templateService;

@@ -57,7 +57,7 @@
     },
     {
       "tag": "value",
-      "stateRenderFunction": "var value = ctx.values.value;\nctx.api.text(element, value.toFixed(0));\n",
+      "stateRenderFunction": "var value = ctx.api.formatValue(ctx.values.value, ctx.properties.valueDecimals, '', false);\nctx.api.text(element, value);\n",
       "actions": {
         "click": {
           "actionFunction": "ctx.api.callAction(event, 'displayClick');"
@@ -120,7 +120,7 @@
       "falseLabel": null,
       "stateLabel": "{i18n:scada.symbol.warning}",
       "defaultGetValueSettings": {
-        "action": "DO_NOTHING",
+        "action": "GET_ALARM_STATUS",
         "defaultValue": false,
         "executeRpc": {
           "method": "getState",
@@ -134,6 +134,15 @@
         },
         "getTimeSeries": {
           "key": "state"
+        },
+        "getAlarmStatus": {
+          "severityList": [
+            "MAJOR",
+            "MINOR",
+            "WARNING",
+            "INDETERMINATE"
+          ],
+          "typeList": null
         },
         "dataToValue": {
           "type": "NONE",
@@ -155,7 +164,7 @@
       "falseLabel": null,
       "stateLabel": "{i18n:scada.symbol.critical}",
       "defaultGetValueSettings": {
-        "action": "DO_NOTHING",
+        "action": "GET_ALARM_STATUS",
         "defaultValue": false,
         "executeRpc": {
           "method": "getState",
@@ -169,6 +178,12 @@
         },
         "getTimeSeries": {
           "key": "state"
+        },
+        "getAlarmStatus": {
+          "severityList": [
+            "CRITICAL"
+          ],
+          "typeList": null
         },
         "dataToValue": {
           "type": "NONE",
@@ -448,16 +463,20 @@
       "name": "{i18n:scada.symbol.units}",
       "type": "units",
       "default": "m³/hr",
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
       "fieldClass": "medium-width",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
+    },
+    {
+      "id": "valueDecimals",
+      "name": "{i18n:scada.symbol.decimals}",
+      "type": "number",
+      "default": 0,
+      "fieldClass": "medium-width",
+      "min": 0,
+      "step": 1,
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "defaultBorderColor",
@@ -496,16 +515,8 @@
         },
         "colorFunction": "var temperature = value;\nif (typeof temperature !== undefined) {\n  var percent = (temperature + 60)/120 * 100;\n  return tinycolor.mix('blue', 'red', percent).toHexString();\n}\nreturn 'blue';"
       },
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "activeBorderColor",
@@ -544,16 +555,8 @@
         },
         "colorFunction": "var temperature = value;\nif (typeof temperature !== undefined) {\n  var percent = (temperature + 60)/120 * 100;\n  return tinycolor.mix('blue', 'red', percent).toHexString();\n}\nreturn 'blue';"
       },
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "warningBorderColor",
@@ -592,16 +595,8 @@
         },
         "colorFunction": "var temperature = value;\nif (typeof temperature !== undefined) {\n  var percent = (temperature + 60)/120 * 100;\n  return tinycolor.mix('blue', 'red', percent).toHexString();\n}\nreturn 'blue';"
       },
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "criticalBorderColor",
@@ -640,16 +635,8 @@
         },
         "colorFunction": "var temperature = value;\nif (typeof temperature !== undefined) {\n  var percent = (temperature + 60)/120 * 100;\n  return tinycolor.mix('blue', 'red', percent).toHexString();\n}\nreturn 'blue';"
       },
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "backgroundColor",
@@ -688,48 +675,24 @@
         },
         "colorFunction": "var temperature = value;\nif (typeof temperature !== undefined) {\n  var percent = (temperature + 60)/120 * 100;\n  return tinycolor.mix('blue', 'red', percent).toHexString();\n}\nreturn 'blue';"
       },
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "fluidColor",
       "name": "{i18n:scada.symbol.fluid-color}",
       "type": "color",
       "default": "#1EC1F480",
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     },
     {
       "id": "pipeColor",
       "name": "{i18n:scada.symbol.pipe-color}",
       "type": "color",
       "default": "#FFFFFF",
-      "required": null,
-      "subLabel": null,
-      "divider": null,
-      "fieldSuffix": null,
-      "disableOnProperty": null,
-      "rowClass": "",
-      "fieldClass": "",
-      "min": null,
-      "max": null,
-      "step": null
+      "disabled": false,
+      "visible": true
     }
   ]
 }]]></tb:metadata>

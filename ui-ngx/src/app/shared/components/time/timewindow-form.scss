@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,16 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 :host {
   background-color: #fff;
 
   .tb-timewindow-form {
     overflow: hidden;
-
-    .tb-flex {
-      gap: 16px;
-    }
 
     &-content {
       overflow-y: auto;
@@ -30,7 +25,8 @@
       tb-timeinterval,
       tb-quick-time-interval,
       tb-datetime-period,
-      tb-datapoints-limit {
+      tb-datapoints-limit,
+      tb-aggregation-type-select {
         flex: 1;
       }
     }

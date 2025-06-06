@@ -1,5 +1,5 @@
 ///
-/// Copyright © 2016-2024 The Thingsboard Authors
+/// Copyright © 2016-2025 The Thingsboard Authors
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -160,7 +160,6 @@ import * as MaterialIconsDialogComponent from '@shared/components/dialog/materia
 import * as ColorInputComponent from '@shared/components/color-input.component';
 import * as MaterialIconSelectComponent from '@shared/components/material-icon-select.component';
 import * as NodeScriptTestDialogComponent from '@shared/components/dialog/node-script-test-dialog.component';
-import * as JsonFormComponent from '@shared/components/json-form/json-form.component';
 import * as NotificationComponent from '@shared/components/notification/notification.component';
 import * as TemplateAutocompleteComponent from '@shared/components/notification/template-autocomplete.component';
 import * as ImageInputComponent from '@shared/components/image-input.component';
@@ -232,10 +231,10 @@ import * as EntityFilterViewComponent from '@home/components/entity/entity-filte
 import * as EntityAliasDialogComponent from '@home/components/alias/entity-alias-dialog.component';
 import * as EntityFilterComponent from '@home/components/entity/entity-filter.component';
 import * as RelationFiltersComponent from '@home/components/relation/relation-filters.component';
-import * as EntityAliasSelectComponent from '@home/components/alias/entity-alias-select.component';
-import * as DataKeysComponent from '@home/components/widget/config/data-keys.component';
-import * as DataKeyConfigDialogComponent from '@home/components/widget/config/data-key-config-dialog.component';
-import * as DataKeyConfigComponent from '@home/components/widget/config/data-key-config.component';
+import * as EntityAliasSelectComponent from '@home/components/widget/lib/settings/common/alias/entity-alias-select.component';
+import * as DataKeysComponent from '@home/components/widget/lib/settings/common/key/data-keys.component';
+import * as DataKeyConfigDialogComponent from '@home/components/widget/lib/settings/common/key/data-key-config-dialog.component';
+import * as DataKeyConfigComponent from '@home/components/widget/lib/settings/common/key/data-key-config.component';
 import * as LegendConfigComponent from '@home/components/widget/lib/settings/common/legend-config.component';
 import * as ManageWidgetActionsComponent from '@home/components/widget/action/manage-widget-actions.component';
 import * as WidgetActionDialogComponent from '@home/components/widget/action/widget-action-dialog.component';
@@ -269,7 +268,7 @@ import * as ComplexFilterPredicateDialogComponent from '@home/components/filter/
 import * as KeyFilterDialogComponent from '@home/components/filter/key-filter-dialog.component';
 import * as FiltersDialogComponent from '@home/components/filter/filters-dialog.component';
 import * as FilterDialogComponent from '@home/components/filter/filter-dialog.component';
-import * as FilterSelectComponent from '@home/components/filter/filter-select.component';
+import * as FilterSelectComponent from '@home/components/widget/lib/settings/common/filter/filter-select.component';
 import * as FiltersEditComponent from '@home/components/filter/filters-edit.component';
 import * as FiltersEditPanelComponent from '@home/components/filter/filters-edit-panel.component';
 import * as UserFilterDialogComponent from '@home/components/filter/user-filter-dialog.component';
@@ -331,13 +330,16 @@ import * as AssetProfileComponent from '@home/components/profile/asset-profile.c
 import * as AssetProfileDialogComponent from '@home/components/profile/asset-profile-dialog.component';
 import * as AssetProfileAutocompleteComponent from '@home/components/profile/asset-profile-autocomplete.component';
 import * as RuleChainSelectComponent from '@shared/components/rule-chain/rule-chain-select.component';
+import * as TimezoneComponent from '@shared/components/time/timezone.component';
+import * as TimezonePanelComponent from '@shared/components/time/timezone-panel.component';
+import * as DatapointsLimitComponent from '@shared/components/time/datapoints-limit.component';
+import * as AggregationTypeSelectComponent from '@shared/components/time/aggregation/aggregation-type-select.component';
+import * as AggregationOptionsConfigComponent from '@shared/components/time/aggregation/aggregation-options-config-panel.component';
+import * as IntervalOptionsConfigPanelComponent from '@shared/components/time/interval-options-config-panel.component';
 
 import { IModulesMap } from '@modules/common/modules-map.models';
-import { TimezoneComponent } from '@shared/components/time/timezone.component';
-import { TimezonePanelComponent } from '@shared/components/time/timezone-panel.component';
-import { DatapointsLimitComponent } from '@shared/components/time/datapoints-limit.component';
-import { Observable, map, of } from 'rxjs';
-import { getFlexLayout } from '@shared/legacy/flex-layout.models';
+import { Observable, of } from 'rxjs';
+import { isJSResourceUrl } from '@shared/public-api';
 
 class ModulesMap implements IModulesMap {
 
@@ -349,10 +351,6 @@ class ModulesMap implements IModulesMap {
     '@angular/common': AngularCommon,
     '@angular/common/http': HttpClientModule,
     '@angular/forms': AngularForms,
-    '@angular/flex-layout': {},
-    '@angular/flex-layout/flex': {},
-    '@angular/flex-layout/grid': {},
-    '@angular/flex-layout/extended': {},
     '@angular/platform-browser': AngularPlatformBrowser,
     '@angular/platform-browser/animations': AngularPlatformBrowserAnimations,
     '@angular/router': AngularRouter,
@@ -469,7 +467,10 @@ class ModulesMap implements IModulesMap {
     '@shared/components/time/timezone-select.component': TimezoneSelectComponent,
     '@shared/components/time/timezone.component': TimezoneComponent,
     '@shared/components/time/timezone-panel.component': TimezonePanelComponent,
-    '@shared/components/time/datapoints-limit': DatapointsLimitComponent,
+    '@shared/components/time/datapoints-limit.component': DatapointsLimitComponent,
+    '@shared/components/time/aggregation/aggregation-type-select.component': AggregationTypeSelectComponent,
+    '@shared/components/time/aggregation/aggregation-options-config-panel.component': AggregationOptionsConfigComponent,
+    '@shared/components/time/interval-options-config-panel.component': IntervalOptionsConfigPanelComponent,
     '@shared/components/value-input.component': ValueInputComponent,
     '@shared/components/dashboard-autocomplete.component': DashboardAutocompleteComponent,
     '@shared/components/entity/entity-subtype-autocomplete.component': EntitySubTypeAutocompleteComponent,
@@ -500,7 +501,6 @@ class ModulesMap implements IModulesMap {
     '@shared/components/color-input.component': ColorInputComponent,
     '@shared/components/material-icon-select.component': MaterialIconSelectComponent,
     '@shared/components/dialog/node-script-test-dialog.component': NodeScriptTestDialogComponent,
-    '@shared/components/json-form/json-form.component': JsonFormComponent,
     '@shared/components/notification/notification.component': NotificationComponent,
     '@shared/components/notification/template-autocomplete.component': TemplateAutocompleteComponent,
     '@shared/components/image-input.component': ImageInputComponent,
@@ -572,10 +572,10 @@ class ModulesMap implements IModulesMap {
     '@home/components/alias/entity-alias-dialog.component': EntityAliasDialogComponent,
     '@home/components/entity/entity-filter.component': EntityFilterComponent,
     '@home/components/relation/relation-filters.component': RelationFiltersComponent,
-    '@home/components/alias/entity-alias-select.component': EntityAliasSelectComponent,
-    '@home/components/widget/config/data-keys.component': DataKeysComponent,
-    '@home/components/widget/config/data-key-config-dialog.component': DataKeyConfigDialogComponent,
-    '@home/components/widget/config/data-key-config.component': DataKeyConfigComponent,
+    '@home/components/widget/lib/settings/common/alias/entity-alias-select.component': EntityAliasSelectComponent,
+    '@home/components/widget/lib/settings/common/key/data-keys.component': DataKeysComponent,
+    '@home/components/widget/lib/settings/common/key/data-key-config-dialog.component': DataKeyConfigDialogComponent,
+    '@home/components/widget/lib/settings/common/key/data-key-config.component': DataKeyConfigComponent,
     '@home/components/widget/lib/settings/common/legend-config.component': LegendConfigComponent,
     '@home/components/widget/action/manage-widget-actions.component': ManageWidgetActionsComponent,
     '@home/components/widget/action/widget-action-dialog.component': WidgetActionDialogComponent,
@@ -605,7 +605,7 @@ class ModulesMap implements IModulesMap {
     '@home/components/filter/key-filter-dialog.component': KeyFilterDialogComponent,
     '@home/components/filter/filters-dialog.component': FiltersDialogComponent,
     '@home/components/filter/filter-dialog.component': FilterDialogComponent,
-    '@home/components/filter/filter-select.component': FilterSelectComponent,
+    '@home/components/widget/lib/settings/common/filter/filter-select.component': FilterSelectComponent,
     '@home/components/filter/filters-edit.component': FiltersEditComponent,
     '@home/components/filter/filters-edit-panel.component': FiltersEditPanelComponent,
     '@home/components/filter/user-filter-dialog.component': UserFilterDialogComponent,
@@ -673,39 +673,30 @@ class ModulesMap implements IModulesMap {
 
   init(): Observable<any> {
     if (!this.initialized) {
-      return getFlexLayout().pipe(
-        map((flexLayout) => {
-          this.modulesMap['@angular/flex-layout'] = flexLayout;
-          this.modulesMap['@angular/flex-layout/flex'] = flexLayout;
-          this.modulesMap['@angular/flex-layout/grid'] = flexLayout;
-          this.modulesMap['@angular/flex-layout/extended'] = flexLayout;
-          System.constructor.prototype.resolve = (id: string) => {
-            try {
-              if (this.modulesMap[id]) {
-                return 'app:' + id;
-              } else {
-                return id;
-              }
-            } catch (err) {
-              return id;
-            }
-          };
-          for (const moduleId of Object.keys(this.modulesMap)) {
-            System.set('app:' + moduleId, this.modulesMap[moduleId]);
+      System.constructor.prototype.resolve = (id: string) => {
+        try {
+          if (this.modulesMap[id]) {
+            return 'app:' + id;
+          } else {
+            return id;
           }
-          System.constructor.prototype.shouldFetch = (url: string) => url.endsWith('/download');
-          System.constructor.prototype.fetch = (url: string, options: RequestInit & {meta?: any}) => {
-            if (options?.meta?.additionalHeaders) {
-              options.headers = { ...options.headers, ...options.meta.additionalHeaders };
-            }
-            return fetch(url, options);
-          };
-          this.initialized = true;
-        })
-      );
-    } else {
-      return of(null);
+        } catch (err) {
+          return id;
+        }
+      };
+      for (const moduleId of Object.keys(this.modulesMap)) {
+        System.set('app:' + moduleId, this.modulesMap[moduleId]);
+      }
+      System.constructor.prototype.shouldFetch = (url: string) => url.endsWith('/download') || isJSResourceUrl(url);
+      System.constructor.prototype.fetch = (url: string, options: RequestInit & {meta?: any}) => {
+        if (options?.meta?.additionalHeaders) {
+          options.headers = { ...options.headers, ...options.meta.additionalHeaders };
+        }
+        return fetch(url, options);
+      };
+      this.initialized = true;
     }
+    return of(null);
   }
 }
 

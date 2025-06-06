@@ -1,5 +1,5 @@
 /**
- * Copyright © 2016-2024 The Thingsboard Authors
+ * Copyright © 2016-2025 The Thingsboard Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,8 +38,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.thingsboard.server.common.data.ResourceSubType;
 import org.thingsboard.server.common.data.ResourceType;
 import org.thingsboard.server.common.data.TbResource;
+import org.thingsboard.server.common.data.TbResourceDeleteResult;
 import org.thingsboard.server.common.data.TbResourceInfo;
 import org.thingsboard.server.common.data.TbResourceInfoFilter;
 import org.thingsboard.server.common.data.exception.ThingsboardException;
@@ -70,6 +72,7 @@ import static org.thingsboard.server.controller.ControllerConstants.PAGE_SIZE_DE
 import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_ID_PARAM_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_INFO_DESCRIPTION;
+import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_SUB_TYPE;
 import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_TEXT_SEARCH_DESCRIPTION;
 import static org.thingsboard.server.controller.ControllerConstants.RESOURCE_TYPE;
 import static org.thingsboard.server.controller.ControllerConstants.SORT_ORDER_DESCRIPTION;
@@ -173,6 +176,21 @@ public class TbResourceController extends BaseController {
         return checkResourceInfoId(resourceId, Operation.READ);
     }
 
+    @ApiOperation(value = "Get resource info (getResourceInfo)",
+            notes = "Get info for the resource with the given type, scope and key. " +
+                    RESOURCE_INFO_DESCRIPTION + SYSTEM_OR_TENANT_AUTHORITY_PARAGRAPH)
+    @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'TENANT_ADMIN')")
+    @GetMapping(value = "/resource/{resourceType}/{scope}/{key}/info")
+    public TbResourceInfo getResourceInfo(@Parameter(description = "Type of the resource", schema = @Schema(allowableValues = {"lwm2m_model", "jks", "pkcs_12", "js_module", "dashboard"}))
+                                          @PathVariable("resourceType") String resourceTypeStr,
+                                          @Parameter(description = "Scope of the resource", schema = @Schema(allowableValues = {"system", "tenant"}))
+                                          @PathVariable String scope,
+                                          @Parameter(description = "Key of the resource, e.g. 'extension.js'")
+                                          @PathVariable String key) throws ThingsboardException {
+        ResourceType resourceType = ResourceType.valueOf(resourceTypeStr.toUpperCase());
+        return checkResourceInfo(scope, resourceType, key, Operation.READ);
+    }
+
     @ApiOperation(value = "Get Resource (getResourceById)",
             notes = "Fetch the Resource object based on the provided Resource Id. " +
                     RESOURCE_DESCRIPTION + SYSTEM_OR_TENANT_AUTHORITY_PARAGRAPH, hidden = true)
@@ -200,7 +218,7 @@ public class TbResourceController extends BaseController {
                                        @RequestBody TbResource resource) throws Exception {
         resource.setTenantId(getTenantId());
         checkEntity(resource.getId(), resource, Resource.TB_RESOURCE);
-        return new TbResourceInfo(tbResourceService.save(resource, getCurrentUser()));
+        return tbResourceService.save(resource, getCurrentUser());
     }
 
     @ApiOperation(value = "Get Resource Infos (getResources)",
@@ -214,6 +232,8 @@ public class TbResourceController extends BaseController {
                                                  @RequestParam int page,
                                                  @Parameter(description = RESOURCE_TYPE, schema = @Schema(allowableValues = {"LWM2M_MODEL", "JKS", "PKCS_12", "JS_MODULE"}))
                                                  @RequestParam(required = false) String resourceType,
+                                                 @Parameter(description = RESOURCE_SUB_TYPE, schema = @Schema(allowableValues = {"EXTENSION", "MODULE"}))
+                                                 @RequestParam(required = false) String resourceSubType,
                                                  @Parameter(description = RESOURCE_TEXT_SEARCH_DESCRIPTION)
                                                  @RequestParam(required = false) String textSearch,
                                                  @Parameter(description = SORT_PROPERTY_DESCRIPTION, schema = @Schema(allowableValues = {"createdTime", "title", "resourceType", "tenantId"}))
@@ -226,8 +246,12 @@ public class TbResourceController extends BaseController {
         Set<ResourceType> resourceTypes = new HashSet<>();
         if (StringUtils.isNotEmpty(resourceType)) {
             resourceTypes.add(ResourceType.valueOf(resourceType));
+            if (StringUtils.isNotEmpty(resourceSubType)) {
+                filter.resourceSubTypes(Set.of(ResourceSubType.valueOf(resourceSubType)));
+            }
         } else {
             Collections.addAll(resourceTypes, ResourceType.values());
+            resourceTypes.remove(ResourceType.JS_MODULE);
             resourceTypes.remove(ResourceType.IMAGE);
             resourceTypes.remove(ResourceType.DASHBOARD);
         }
@@ -299,12 +323,14 @@ public class TbResourceController extends BaseController {
             notes = "Deletes the Resource. Referencing non-existing Resource Id will cause an error." + SYSTEM_OR_TENANT_AUTHORITY_PARAGRAPH)
     @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'TENANT_ADMIN')")
     @DeleteMapping(value = "/resource/{resourceId}")
-    public void deleteResource(@Parameter(description = RESOURCE_ID_PARAM_DESCRIPTION)
-                               @PathVariable("resourceId") String strResourceId) throws ThingsboardException {
+    public ResponseEntity<TbResourceDeleteResult> deleteResource(@Parameter(description = RESOURCE_ID_PARAM_DESCRIPTION)
+                                                                 @PathVariable("resourceId") String strResourceId,
+                                                                 @RequestParam(name = "force", required = false) boolean force) throws ThingsboardException {
         checkParameter(RESOURCE_ID, strResourceId);
         TbResourceId resourceId = new TbResourceId(toUUID(strResourceId));
         TbResource tbResource = checkResourceId(resourceId, Operation.DELETE);
-        tbResourceService.delete(tbResource, getCurrentUser());
+        TbResourceDeleteResult tbResourceDeleteResult = tbResourceService.delete(tbResource, force, getCurrentUser());
+        return (tbResourceDeleteResult.isSuccess() ? ResponseEntity.ok() : ResponseEntity.badRequest()).body(tbResourceDeleteResult);
     }
 
     private ResponseEntity<ByteArrayResource> downloadResourceIfChanged(String strResourceId, String etag) throws ThingsboardException {

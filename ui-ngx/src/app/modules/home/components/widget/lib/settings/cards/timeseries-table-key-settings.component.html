@@ -1,6 +1,6 @@
 <!--
 
-    Copyright © 2016-2024 The Thingsboard Authors
+    Copyright © 2016-2025 The Thingsboard Authors
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -47,6 +47,11 @@
         </mat-select>
       </mat-form-field>
     </div>
+    <div class="tb-form-row">
+      <mat-slide-toggle class="mat-slide"  formControlName="disableSorting">
+        {{ 'widgets.table.disable-sorting' | translate }}
+      </mat-slide-toggle>
+    </div>
   </div>
   <div class="tb-form-panel tb-slide-toggle">
     <mat-expansion-panel class="tb-settings" [expanded]="timeseriesTableKeySettingsForm.get('useCellStyleFunction').value">
@@ -63,6 +68,7 @@
       <ng-template matExpansionPanelContent>
         <tb-js-func required
                     formControlName="cellStyleFunction"
+                    withModules
                     [globalVariables]="functionScopeVariables"
                     [functionArgs]="['value', 'rowData', 'ctx']"
                     functionTitle="{{ 'widgets.table.cell-style-function' | translate }}"
@@ -86,6 +92,7 @@
       <ng-template matExpansionPanelContent>
         <tb-js-func required
                     formControlName="cellContentFunction"
+                    withModules
                     [globalVariables]="functionScopeVariables"
                     [functionArgs]="['value', 'rowData', 'ctx']"
                     functionTitle="{{ 'widgets.table.cell-content-function' | translate }}"
